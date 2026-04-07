@@ -18,6 +18,7 @@ pub struct Trade {
     pub return_percent: f64,
     pub status: String,
     pub tags: Vec<String>,
+    pub mistakes: Vec<String>,
     pub setup: Option<String>,
     pub chart_image_data: Option<String>,
     pub notes_html: String,
@@ -27,11 +28,18 @@ pub struct Trade {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CalendarDayStat { pub date: String, pub trades: i64, pub pnl: f64 }
+pub struct CalendarDayStat {
+    pub date: String,
+    pub trades: i64,
+    pub pnl: f64,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EquityPoint { pub date: String, pub value: f64 }
+pub struct EquityPoint {
+    pub date: String,
+    pub value: f64,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

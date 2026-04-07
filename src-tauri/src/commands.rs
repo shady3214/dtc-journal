@@ -39,16 +39,19 @@ pub async fn proxy_tv_search(query: String) -> Result<String, String> {
 #[tauri::command]
 pub fn list_trades(app: AppHandle) -> Result<Vec<Trade>, String> {
     let conn = db::connection(&app)?;
-    let mut stmt = conn.prepare("SELECT id,pair,direction,entry,stop_loss,take_profit,lot_size,capital,enable_commission,commission_per_lot,risk_percent,pnl,return_percent,status,tags_json,setup,chart_image_data,notes_html,opened_at,closed_at FROM trades ORDER BY opened_at DESC").map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT id,pair,direction,entry,stop_loss,take_profit,lot_size,capital,enable_commission,commission_per_lot,risk_percent,pnl,return_percent,status,tags_json,mistakes_json,setup,chart_image_data,notes_html,opened_at,closed_at FROM trades ORDER BY opened_at DESC").map_err(|e| e.to_string())?;
     let rows = stmt.query_map([], |row| {
         let tags_json: String = row.get(14)?;
+        let mistakes_json: String = row.get(15)?;
         Ok(Trade {
             id: row.get(0)?, pair: row.get(1)?, direction: row.get(2)?, entry: row.get(3)?,
             stop_loss: row.get(4)?, take_profit: row.get(5)?, lot_size: row.get(6)?, capital: row.get(7)?,
             enable_commission: row.get::<_, i64>(8)? != 0, commission_per_lot: row.get(9)?,
             risk_percent: row.get(10)?, pnl: row.get(11)?, return_percent: row.get(12)?, status: row.get(13)?,
-            tags: serde_json::from_str(&tags_json).unwrap_or_default(), setup: row.get(15)?, chart_image_data: row.get(16)?,
-            notes_html: row.get(17)?, opened_at: row.get(18)?, closed_at: row.get(19)?,
+            tags: serde_json::from_str(&tags_json).unwrap_or_default(),
+            mistakes: serde_json::from_str(&mistakes_json).unwrap_or_default(),
+            setup: row.get(16)?, chart_image_data: row.get(17)?,
+            notes_html: row.get(18)?, opened_at: row.get(19)?, closed_at: row.get(20)?,
         })
     }).map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
@@ -57,10 +60,10 @@ pub fn list_trades(app: AppHandle) -> Result<Vec<Trade>, String> {
 #[tauri::command]
 pub fn upsert_trade(app: AppHandle, trade: Trade) -> Result<Trade, String> {
     let conn = db::connection(&app)?;
-    conn.execute("INSERT INTO trades (id,pair,direction,entry,stop_loss,take_profit,lot_size,capital,enable_commission,commission_per_lot,risk_percent,pnl,return_percent,status,tags_json,setup,chart_image_data,notes_html,opened_at,closed_at)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)
-     ON CONFLICT(id) DO UPDATE SET pair=excluded.pair,direction=excluded.direction,entry=excluded.entry,stop_loss=excluded.stop_loss,take_profit=excluded.take_profit,lot_size=excluded.lot_size,capital=excluded.capital,enable_commission=excluded.enable_commission,commission_per_lot=excluded.commission_per_lot,risk_percent=excluded.risk_percent,pnl=excluded.pnl,return_percent=excluded.return_percent,status=excluded.status,tags_json=excluded.tags_json,setup=excluded.setup,chart_image_data=excluded.chart_image_data,notes_html=excluded.notes_html,opened_at=excluded.opened_at,closed_at=excluded.closed_at",
-     params![trade.id,trade.pair,trade.direction,trade.entry,trade.stop_loss,trade.take_profit,trade.lot_size,trade.capital,if trade.enable_commission {1}else{0},trade.commission_per_lot,trade.risk_percent,trade.pnl,trade.return_percent,trade.status,serde_json::to_string(&trade.tags).map_err(|e| e.to_string())?,trade.setup,trade.chart_image_data,trade.notes_html,trade.opened_at,trade.closed_at]).map_err(|e| e.to_string())?;
+    conn.execute("INSERT INTO trades (id,pair,direction,entry,stop_loss,take_profit,lot_size,capital,enable_commission,commission_per_lot,risk_percent,pnl,return_percent,status,tags_json,mistakes_json,setup,chart_image_data,notes_html,opened_at,closed_at)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)
+     ON CONFLICT(id) DO UPDATE SET pair=excluded.pair,direction=excluded.direction,entry=excluded.entry,stop_loss=excluded.stop_loss,take_profit=excluded.take_profit,lot_size=excluded.lot_size,capital=excluded.capital,enable_commission=excluded.enable_commission,commission_per_lot=excluded.commission_per_lot,risk_percent=excluded.risk_percent,pnl=excluded.pnl,return_percent=excluded.return_percent,status=excluded.status,tags_json=excluded.tags_json,mistakes_json=excluded.mistakes_json,setup=excluded.setup,chart_image_data=excluded.chart_image_data,notes_html=excluded.notes_html,opened_at=excluded.opened_at,closed_at=excluded.closed_at",
+     params![trade.id,trade.pair,trade.direction,trade.entry,trade.stop_loss,trade.take_profit,trade.lot_size,trade.capital,if trade.enable_commission {1}else{0},trade.commission_per_lot,trade.risk_percent,trade.pnl,trade.return_percent,trade.status,serde_json::to_string(&trade.tags).map_err(|e| e.to_string())?,serde_json::to_string(&trade.mistakes).map_err(|e| e.to_string())?,trade.setup,trade.chart_image_data,trade.notes_html,trade.opened_at,trade.closed_at]).map_err(|e| e.to_string())?;
     Ok(trade)
 }
 

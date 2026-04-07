@@ -3,7 +3,11 @@ use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
 pub fn connection(app: &AppHandle) -> Result<Connection, String> {
-    let path = app.path().app_data_dir().map_err(|e| e.to_string())?.join("journal.db");
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("journal.db");
     std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     migrate(&conn)?;
@@ -28,6 +32,7 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             return_percent REAL NOT NULL,
             status TEXT NOT NULL,
             tags_json TEXT NOT NULL,
+            mistakes_json TEXT NOT NULL DEFAULT '[]',
             setup TEXT,
             chart_image_data TEXT,
             notes_html TEXT NOT NULL,
@@ -45,7 +50,22 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             created_at TEXT NOT NULL
         );",
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    // Migration: add mistakes_json column to existing trades tables that lack it
+    let has_mistakes: bool = conn
+        .prepare("SELECT COUNT(*) FROM pragma_table_info('trades') WHERE name='mistakes_json'")
+        .and_then(|mut s| s.query_row([], |r| r.get::<_, i64>(0)))
+        .unwrap_or(0)
+        > 0;
+    if !has_mistakes {
+        conn.execute_batch(
+            "ALTER TABLE trades ADD COLUMN mistakes_json TEXT NOT NULL DEFAULT '[]';",
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 pub fn save_ai(
