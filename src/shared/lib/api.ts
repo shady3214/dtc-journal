@@ -1,4 +1,4 @@
-import type { AiAnalysis, AnalyticsSummary, AppSettings, CalendarDayStat, JournalEntry, ThemeName, Trade } from '../types/domain'
+import type { AiAnalysis, AnalyticsSummary, AppSettings, CalendarDayStat, JournalEntry, ThemeName, Trade, TradingAccount } from '../types/domain'
 import {
   dbListTrades, dbSaveTrade, dbDeleteTrade,
   dbGetJournalEntry, dbSaveJournalEntry, dbListJournalEntries,
@@ -25,9 +25,20 @@ const STORAGE_KEY = 'journal_trades'
 const JOURNAL_KEY = 'journal_entries'
 const SETTINGS_KEY = 'journal_settings'
 
+const DEFAULT_ACCOUNT_ID = 'default'
+
+const DEFAULT_ACCOUNT: TradingAccount = {
+  id: DEFAULT_ACCOUNT_ID,
+  name: 'Main Account',
+  capital: 1000,
+  createdAt: new Date().toISOString(),
+}
+
 export const DEFAULT_SETTINGS: AppSettings = {
   displayName: '',
   startingCapital: 0,
+  accounts: [DEFAULT_ACCOUNT],
+  activeAccountId: DEFAULT_ACCOUNT_ID,
   defaultCapital: 1000,
   defaultRiskPercent: 1,
   defaultCommissionPerLot: 0,
@@ -46,15 +57,23 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
-    if (!raw) return { ...DEFAULT_SETTINGS }
+    if (!raw) return { ...DEFAULT_SETTINGS, accounts: [{ ...DEFAULT_ACCOUNT }] }
     const parsed = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
     // Migrate legacy theme values
     if (parsed.theme === 'dark' || parsed.theme === 'light') {
       parsed.theme = 'obsidian'
     }
+    // Migrate: ensure accounts array exists
+    if (!parsed.accounts || !Array.isArray(parsed.accounts) || parsed.accounts.length === 0) {
+      parsed.accounts = [{ ...DEFAULT_ACCOUNT, capital: parsed.startingCapital || parsed.defaultCapital || 1000 }]
+      parsed.activeAccountId = DEFAULT_ACCOUNT_ID
+    }
+    if (!parsed.activeAccountId) {
+      parsed.activeAccountId = parsed.accounts[0]?.id || DEFAULT_ACCOUNT_ID
+    }
     return parsed
   } catch {
-    return { ...DEFAULT_SETTINGS }
+    return { ...DEFAULT_SETTINGS, accounts: [{ ...DEFAULT_ACCOUNT }] }
   }
 }
 
@@ -62,9 +81,23 @@ export function persistSettings(settings: AppSettings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
 }
 
+/** Get the active account ID from settings */
+export function getActiveAccountId(): string {
+  const settings = loadSettings()
+  return settings.activeAccountId || DEFAULT_ACCOUNT_ID
+}
+
+/** Get account-scoped localStorage key */
+function acctKey(base: string): string {
+  const acctId = getActiveAccountId()
+  // Default account uses unscoped keys for backward compatibility with existing data
+  if (acctId === DEFAULT_ACCOUNT_ID) return base
+  return `${base}_${acctId}`
+}
+
 function loadTrades(): Trade[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
+    const raw = JSON.parse(localStorage.getItem(acctKey(STORAGE_KEY)) || '[]')
     // Migration: ensure new fields exist on old trades
     return raw.map((t: any) => ({
       ...t,
@@ -77,19 +110,19 @@ function loadTrades(): Trade[] {
 }
 
 function persistTrades(trades: Trade[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(trades))
+  localStorage.setItem(acctKey(STORAGE_KEY), JSON.stringify(trades))
 }
 
 function loadJournalEntries(): Record<string, JournalEntry> {
   try {
-    return JSON.parse(localStorage.getItem(JOURNAL_KEY) || '{}')
+    return JSON.parse(localStorage.getItem(acctKey(JOURNAL_KEY)) || '{}')
   } catch {
     return {}
   }
 }
 
 function persistJournalEntries(entries: Record<string, JournalEntry>) {
-  localStorage.setItem(JOURNAL_KEY, JSON.stringify(entries))
+  localStorage.setItem(acctKey(JOURNAL_KEY), JSON.stringify(entries))
 }
 
 // ── AI Provider Helpers ─────────────────────────────────────
@@ -544,16 +577,16 @@ const browserApi = {
   },
 
   clearTrades: async (): Promise<void> => {
-    localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(acctKey(STORAGE_KEY))
   },
 
   clearJournals: async (): Promise<void> => {
-    localStorage.removeItem(JOURNAL_KEY)
+    localStorage.removeItem(acctKey(JOURNAL_KEY))
   },
 
   clearAllData: async (): Promise<void> => {
-    localStorage.removeItem(STORAGE_KEY)
-    localStorage.removeItem(JOURNAL_KEY)
+    localStorage.removeItem(acctKey(STORAGE_KEY))
+    localStorage.removeItem(acctKey(JOURNAL_KEY))
     localStorage.removeItem(SETTINGS_KEY)
     localStorage.removeItem('journal_starting_capital')
   },
@@ -562,12 +595,12 @@ const browserApi = {
 // ── Tauri native API ────────────────────────────────────────
 
 const tauriApi = {
-  listTrades: () => invoke<Trade[]>('list_trades'),
-  saveTrade: (trade: Trade) => invoke<Trade>('upsert_trade', { trade }),
+  listTrades: () => invoke<Trade[]>('list_trades', { accountId: getActiveAccountId() }),
+  saveTrade: (trade: Trade) => invoke<Trade>('upsert_trade', { trade, accountId: getActiveAccountId() }),
   deleteTrade: (id: string) => invoke<void>('delete_trade', { id }),
   monthStats: (year: number, month: number) =>
-    invoke<CalendarDayStat[]>('get_calendar_month', { year, month }),
-  analytics: () => invoke<AnalyticsSummary>('get_analytics'),
+    invoke<CalendarDayStat[]>('get_calendar_month', { year, month, accountId: getActiveAccountId() }),
+  analytics: () => invoke<AnalyticsSummary>('get_analytics', { accountId: getActiveAccountId() }),
   analyzeTradeImage: (tradeId: string, imagePath: string) =>
     invoke<AiAnalysis>('analyze_trade_image', { tradeId, imagePath }),
   listTradeAnalyses: (tradeId: string) => invoke<AiAnalysis[]>('list_trade_analyses', { tradeId }),

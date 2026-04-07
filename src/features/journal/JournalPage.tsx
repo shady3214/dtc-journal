@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getApi } from '../../shared/lib/api'
 import type { JournalEntry } from '../../shared/types/domain'
+import { useAccount } from '../../shared/contexts/AccountContext'
 
 const BIASES = ['Bullish', 'Bearish', 'Neutral']
 const SESSIONS = ['Asian', 'London', 'New York']
@@ -315,6 +316,7 @@ function JournalForm({ entry, onUpdate, onSave, onCancel, showCancel }: {
 /* ── Main Page ─────────────────────────────────────────────── */
 
 export function JournalPage() {
+  const { refreshKey } = useAccount()
   const [date, setDate] = useState(todayStr)
   const [entry, setEntry] = useState<JournalEntry>(emptyEntry(date))
   const [loading, setLoading] = useState(false)
@@ -350,7 +352,7 @@ export function JournalPage() {
 
   useEffect(() => {
     loadEntry(date)
-  }, [date, loadEntry])
+  }, [date, loadEntry, refreshKey])
 
   const goDay = (offset: number) => {
     const d = new Date(date + 'T12:00:00')

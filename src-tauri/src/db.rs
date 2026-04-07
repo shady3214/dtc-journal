@@ -18,6 +18,7 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS trades (
             id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL DEFAULT 'default',
             pair TEXT NOT NULL,
             direction TEXT NOT NULL,
             entry REAL NOT NULL,
@@ -61,6 +62,19 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     if !has_mistakes {
         conn.execute_batch(
             "ALTER TABLE trades ADD COLUMN mistakes_json TEXT NOT NULL DEFAULT '[]';",
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // Migration: add account_id column to existing trades tables that lack it
+    let has_account_id: bool = conn
+        .prepare("SELECT COUNT(*) FROM pragma_table_info('trades') WHERE name='account_id'")
+        .and_then(|mut s| s.query_row([], |r| r.get::<_, i64>(0)))
+        .unwrap_or(0)
+        > 0;
+    if !has_account_id {
+        conn.execute_batch(
+            "ALTER TABLE trades ADD COLUMN account_id TEXT NOT NULL DEFAULT 'default';",
         )
         .map_err(|e| e.to_string())?;
     }

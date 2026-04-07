@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppSettings, ThemeName } from '../../shared/types/domain'
 import { getApi, loadSettings } from '../../shared/lib/api'
 import { exportAllToExcel } from '../../shared/lib/excel'
+import { useAccount } from '../../shared/contexts/AccountContext'
+
+const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
 
 const THEMES: { id: ThemeName; color: string; label: string }[] = [
   { id: 'obsidian', color: '#22c55e', label: 'Obsidian' },
@@ -19,6 +22,81 @@ export function SettingsPage() {
   const [confirmAction, setConfirmAction] = useState<string | null>(null)
   const [dataNotice, setDataNotice] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const { accounts, activeAccount, addAccount, updateAccount, deleteAccount } = useAccount()
+
+  // New account form state
+  const [newAcctName, setNewAcctName] = useState('')
+  const [newAcctCapital, setNewAcctCapital] = useState('')
+  const [newAcctDesc, setNewAcctDesc] = useState('')
+
+  // Edit account state
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editCapital, setEditCapital] = useState('')
+  const [editDesc, setEditDesc] = useState('')
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  // Update checker state
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloading' | 'upToDate' | 'error'>('idle')
+  const [updateVersion, setUpdateVersion] = useState('')
+  const [updateNotes, setUpdateNotes] = useState('')
+  const [updateError, setUpdateError] = useState('')
+  const [downloadProgress, setDownloadProgress] = useState(0)
+  const [pendingUpdate, setPendingUpdate] = useState<any>(null)
+
+  // Check for updates (Tauri only)
+  const checkForUpdate = useCallback(async () => {
+    if (!isTauri) return
+    setUpdateStatus('checking')
+    setUpdateError('')
+    setUpdateVersion('')
+    setUpdateNotes('')
+    setPendingUpdate(null)
+    try {
+      const { check } = await import('@tauri-apps/plugin-updater')
+      const update = await check()
+      if (update) {
+        setUpdateStatus('available')
+        setUpdateVersion(update.version)
+        setUpdateNotes(update.body || '')
+        setPendingUpdate(update)
+      } else {
+        setUpdateStatus('upToDate')
+      }
+    } catch (err) {
+      setUpdateStatus('error')
+      setUpdateError(String(err instanceof Error ? err.message : err))
+    }
+  }, [])
+
+  // Download and install update, then relaunch
+  const installUpdate = useCallback(async () => {
+    if (!pendingUpdate) return
+    setUpdateStatus('downloading')
+    setDownloadProgress(0)
+    try {
+      let totalLength = 0
+      let downloaded = 0
+      await pendingUpdate.downloadAndInstall((event: any) => {
+        if (event.event === 'Started') {
+          totalLength = event.data?.contentLength || 0
+        } else if (event.event === 'Progress') {
+          downloaded += event.data?.chunkLength || 0
+          if (totalLength > 0) {
+            setDownloadProgress(Math.round((downloaded / totalLength) * 100))
+          }
+        } else if (event.event === 'Finished') {
+          setDownloadProgress(100)
+        }
+      })
+      // Relaunch the app
+      const { relaunch } = await import('@tauri-apps/plugin-process')
+      await relaunch()
+    } catch (err) {
+      setUpdateStatus('error')
+      setUpdateError(String(err instanceof Error ? err.message : err))
+    }
+  }, [pendingUpdate])
 
   // Persist on save
   const save = useCallback(async () => {
@@ -210,6 +288,178 @@ export function SettingsPage() {
             />
             <span className="settings-hint">Used for the equity curve baseline on the dashboard.</span>
           </div>
+        </div>
+      </section>
+
+      {/* ── Trading Accounts ─────────────────────────────────── */}
+      <section className="card settings-section">
+        <h3 className="settings-section-title">Trading Accounts</h3>
+        <p className="muted" style={{ marginBottom: 16 }}>
+          Manage multiple trading accounts. Each account has its own trades, journal entries, and analytics.
+        </p>
+
+        {/* Account list */}
+        <div className="accounts-list">
+          {accounts.map((acct) => (
+            <div
+              key={acct.id}
+              className={`account-card ${acct.id === activeAccount.id ? 'active-account' : ''}`}
+            >
+              <div className="account-card-avatar">
+                {acct.name.charAt(0).toUpperCase()}
+              </div>
+
+              {editingId === acct.id ? (
+                /* Inline edit form */
+                <div className="account-edit-row">
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="Account name"
+                    style={{ flex: 2 }}
+                  />
+                  <input
+                    type="number"
+                    value={editCapital}
+                    onChange={(e) => setEditCapital(e.target.value)}
+                    placeholder="Capital"
+                    style={{ flex: 1 }}
+                  />
+                  <input
+                    type="text"
+                    value={editDesc}
+                    onChange={(e) => setEditDesc(e.target.value)}
+                    placeholder="Description (optional)"
+                    style={{ flex: 2 }}
+                  />
+                  <button
+                    className="mini-btn"
+                    onClick={() => {
+                      if (editName.trim()) {
+                        updateAccount(acct.id, {
+                          name: editName.trim(),
+                          capital: parseFloat(editCapital) || 0,
+                          description: editDesc.trim() || undefined,
+                        })
+                      }
+                      setEditingId(null)
+                    }}
+                  >
+                    Save
+                  </button>
+                  <button className="mini-btn" onClick={() => setEditingId(null)}>
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                /* Read-only view */
+                <>
+                  <div className="account-card-info">
+                    <div className="account-card-name">
+                      {acct.name}
+                      {acct.id === activeAccount.id && (
+                        <span className="account-card-badge" style={{ marginLeft: 8 }}>Active</span>
+                      )}
+                    </div>
+                    <div className="account-card-meta">
+                      ${acct.capital.toLocaleString()} capital
+                    </div>
+                    {acct.description && (
+                      <div className="account-card-desc">{acct.description}</div>
+                    )}
+                  </div>
+                  <div className="account-card-actions">
+                    <button
+                      className="mini-btn"
+                      onClick={() => {
+                        setEditingId(acct.id)
+                        setEditName(acct.name)
+                        setEditCapital(acct.capital.toString())
+                        setEditDesc(acct.description || '')
+                      }}
+                    >
+                      Edit
+                    </button>
+                    {accounts.length > 1 && (
+                      deleteConfirmId === acct.id ? (
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            className="mini-btn delete-btn"
+                            onClick={() => {
+                              deleteAccount(acct.id)
+                              setDeleteConfirmId(null)
+                            }}
+                          >
+                            Confirm
+                          </button>
+                          <button className="mini-btn" onClick={() => setDeleteConfirmId(null)}>
+                            No
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          className="mini-btn delete-btn"
+                          onClick={() => setDeleteConfirmId(acct.id)}
+                        >
+                          Del
+                        </button>
+                      )
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Add new account form */}
+        <div className="add-account-form">
+          <div className="settings-field">
+            <label className="label">Name</label>
+            <input
+              type="text"
+              placeholder="e.g. Main, Demo, Funded"
+              value={newAcctName}
+              onChange={(e) => setNewAcctName(e.target.value)}
+            />
+          </div>
+          <div className="settings-field">
+            <label className="label">Capital ($)</label>
+            <input
+              type="number"
+              min={0}
+              step={100}
+              placeholder="10000"
+              value={newAcctCapital}
+              onChange={(e) => setNewAcctCapital(e.target.value)}
+            />
+          </div>
+          <div className="settings-field">
+            <label className="label">Description</label>
+            <input
+              type="text"
+              placeholder="Optional note"
+              value={newAcctDesc}
+              onChange={(e) => setNewAcctDesc(e.target.value)}
+            />
+          </div>
+          <button
+            className="btn-pill btn-primary add-account-btn"
+            disabled={!newAcctName.trim()}
+            onClick={() => {
+              addAccount(
+                newAcctName.trim(),
+                parseFloat(newAcctCapital) || 0,
+                newAcctDesc.trim() || undefined,
+              )
+              setNewAcctName('')
+              setNewAcctCapital('')
+              setNewAcctDesc('')
+            }}
+          >
+            + Add Account
+          </button>
         </div>
       </section>
 
@@ -458,6 +708,82 @@ export function SettingsPage() {
         </div>
         {dataNotice && <p className="settings-data-notice">{dataNotice}</p>}
       </section>
+
+      {/* ── App Updates (Tauri only) ────────────────────────── */}
+      {isTauri && (
+        <section className="card settings-section">
+          <h3 className="settings-section-title">App Updates</h3>
+          <div className="updater-info">
+            <div className="updater-current">
+              <span className="updater-label">Current Version</span>
+              <span className="updater-version">v0.1.0</span>
+            </div>
+
+            {updateStatus === 'idle' && (
+              <button className="btn-pill btn-secondary" onClick={checkForUpdate}>
+                Check for Updates
+              </button>
+            )}
+
+            {updateStatus === 'checking' && (
+              <div className="updater-status">
+                <span className="updater-spinner" />
+                <span>Checking for updates...</span>
+              </div>
+            )}
+
+            {updateStatus === 'upToDate' && (
+              <div className="updater-status updater-ok">
+                You're on the latest version.
+                <button className="btn-pill btn-secondary" onClick={checkForUpdate} style={{ marginLeft: 12 }}>
+                  Check Again
+                </button>
+              </div>
+            )}
+
+            {updateStatus === 'available' && (
+              <div className="updater-available">
+                <div className="updater-new-version">
+                  <span className="updater-badge">Update Available</span>
+                  <span className="updater-version">v{updateVersion}</span>
+                </div>
+                {updateNotes && (
+                  <div className="updater-notes">
+                    <p className="muted">{updateNotes}</p>
+                  </div>
+                )}
+                <button className="btn-pill btn-primary" onClick={installUpdate}>
+                  Download &amp; Install
+                </button>
+              </div>
+            )}
+
+            {updateStatus === 'downloading' && (
+              <div className="updater-downloading">
+                <span>Downloading update... {downloadProgress}%</span>
+                <div className="updater-progress-track">
+                  <div
+                    className="updater-progress-fill"
+                    style={{ width: `${downloadProgress}%` }}
+                  />
+                </div>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  The app will restart automatically when done.
+                </span>
+              </div>
+            )}
+
+            {updateStatus === 'error' && (
+              <div className="updater-status updater-fail">
+                <span>Update failed: {updateError}</span>
+                <button className="btn-pill btn-secondary" onClick={checkForUpdate} style={{ marginLeft: 12 }}>
+                  Retry
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ── Danger Zone ──────────────────────────────────────── */}
       <section className="card settings-section settings-danger">

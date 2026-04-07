@@ -5,6 +5,7 @@ import type { AiAnalysis, Trade } from '../../shared/types/domain'
 import { getApi, loadSettings } from '../../shared/lib/api'
 import { SymbolSearch } from '../../shared/components/SymbolSearch'
 import { fetchLivePrice } from '../../shared/lib/price'
+import { useAccount } from '../../shared/contexts/AccountContext'
 
 const MISTAKE_CATEGORIES = [
   'FOMO', 'Revenge Trade', 'Moved SL', 'No Plan', 'Oversize',
@@ -50,6 +51,7 @@ export function TradesPage() {
   const q = useQueryClient()
   const location = useLocation()
   const navigate = useNavigate()
+  const { refreshKey } = useAccount()
   const editTrade = (location.state as any)?.trade as Trade | undefined
 
   const [form, setForm] = useState<Trade>(() => editTrade ? { ...editTrade, mistakes: editTrade.mistakes || [] } : makeEmptyTrade())
@@ -75,6 +77,14 @@ export function TradesPage() {
       window.history.replaceState({}, '')
     }
   }, [editTrade])
+
+  // Reset form when switching accounts
+  useEffect(() => {
+    if (!editTrade) {
+      resetForm()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey])
 
   // ── Auto-calculations ──────────────────────────────────────
 

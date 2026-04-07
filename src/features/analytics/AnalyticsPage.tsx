@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { getApi } from '../../shared/lib/api'
 import { exportAllToExcel } from '../../shared/lib/excel'
 import type { Trade } from '../../shared/types/domain'
+import { useAccount } from '../../shared/contexts/AccountContext'
 
 /* ── Helpers ───────────────────────────────────────────────── */
 
@@ -436,7 +437,8 @@ ${trades.sort((a, b) => b.openedAt.localeCompare(a.openedAt)).map((t) =>
 /* ── Main Analytics Page ───────────────────────────────────── */
 
 export function AnalyticsPage() {
-  const trades = useQuery({ queryKey: ['trades'], queryFn: () => getApi().listTrades() })
+  const { refreshKey } = useAccount()
+  const trades = useQuery({ queryKey: ['trades', refreshKey], queryFn: () => getApi().listTrades() })
   const allTrades = trades.data ?? []
 
   const pairData = useMemo(() => groupBy(allTrades, (t) => t.pair), [allTrades])

@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { loadSettings, persistSettings } from '../shared/lib/api'
 import { useAuth } from '../shared/contexts/AuthContext'
+import { useAccount } from '../shared/contexts/AccountContext'
 import type { ThemeName } from '../shared/types/domain'
 
 const THEMES: { id: ThemeName; color: string; label: string }[] = [
@@ -86,6 +87,8 @@ function NavIcon({ name }: { name: string }) {
 export function AppShell() {
   const location = useLocation()
   const { user, signOut, configured } = useAuth()
+  const { accounts, activeAccount, switchAccount } = useAccount()
+  const [acctDropdownOpen, setAcctDropdownOpen] = useState(false)
   const [theme, setTheme] = useState<ThemeName>(() => {
     const s = loadSettings()
     return s.theme || 'obsidian'
@@ -164,6 +167,75 @@ export function AppShell() {
             </button>
           </div>
           {sidebarOpen && <p className="sidebar-tagline">Trading Performance Tracker</p>}
+        </div>
+
+        {/* Account Switcher */}
+        <div className="account-switcher">
+          <button
+            className="account-switcher-btn"
+            onClick={() => setAcctDropdownOpen(!acctDropdownOpen)}
+            title={activeAccount.name}
+          >
+            <div className="account-switcher-avatar">
+              {activeAccount.name.charAt(0).toUpperCase()}
+            </div>
+            {sidebarOpen && (
+              <>
+                <div className="account-switcher-info">
+                  <span className="account-switcher-name">{activeAccount.name}</span>
+                  <span className="account-switcher-capital">
+                    ${activeAccount.capital.toLocaleString()}
+                  </span>
+                </div>
+                <svg
+                  width="12" height="12" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  className={`account-switcher-chevron ${acctDropdownOpen ? 'open' : ''}`}
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </>
+            )}
+          </button>
+
+          {acctDropdownOpen && sidebarOpen && (
+            <div className="account-dropdown">
+              {accounts.map((acct) => (
+                <button
+                  key={acct.id}
+                  className={`account-dropdown-item ${acct.id === activeAccount.id ? 'active' : ''}`}
+                  onClick={() => {
+                    switchAccount(acct.id)
+                    setAcctDropdownOpen(false)
+                  }}
+                >
+                  <div className="account-dropdown-avatar">
+                    {acct.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="account-dropdown-info">
+                    <span className="account-dropdown-name">{acct.name}</span>
+                    <span className="account-dropdown-capital">${acct.capital.toLocaleString()}</span>
+                  </div>
+                  {acct.id === activeAccount.id && (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                </button>
+              ))}
+              <NavLink
+                to="/settings"
+                className="account-dropdown-manage"
+                onClick={() => setAcctDropdownOpen(false)}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                Manage Accounts
+              </NavLink>
+            </div>
+          )}
         </div>
 
         <hr className="sidebar-divider" />

@@ -69,10 +69,22 @@ export interface JournalEntry {
 
 export type ThemeName = 'obsidian' | 'midnight' | 'ember' | 'crimson' | 'phantom'
 
+export interface TradingAccount {
+  id: string
+  name: string
+  capital: number
+  description?: string
+  createdAt: string
+}
+
 export interface AppSettings {
   // Account
   displayName: string
   startingCapital: number
+
+  // Multi-account
+  accounts: TradingAccount[]
+  activeAccountId: string
 
   // Trading Defaults
   defaultCapital: number

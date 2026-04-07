@@ -7,6 +7,7 @@ import type { EquityPoint } from '../../shared/types/domain'
 import { ProfitabilityGauges } from '../../shared/components/ProfitabilityGauges'
 import { TradingHistory } from '../../shared/components/TradingHistory'
 import { TradingCalendar } from '../../shared/components/TradingCalendar'
+import { useAccount } from '../../shared/contexts/AccountContext'
 
 function loadCapital(): number {
   return loadSettings().startingCapital || 0
@@ -192,8 +193,9 @@ function ChartLightbox({ src, alt, onClose }: { src: string; alt: string; onClos
 export function DashboardPage() {
   const q = useQueryClient()
   const navigate = useNavigate()
-  const analytics = useQuery({ queryKey: ['analytics'], queryFn: () => getApi().analytics() })
-  const trades = useQuery({ queryKey: ['trades'], queryFn: () => getApi().listTrades() })
+  const { refreshKey } = useAccount()
+  const analytics = useQuery({ queryKey: ['analytics', refreshKey], queryFn: () => getApi().analytics() })
+  const trades = useQuery({ queryKey: ['trades', refreshKey], queryFn: () => getApi().listTrades() })
   const [lightboxImg, setLightboxImg] = useState<{ src: string; alt: string } | null>(null)
 
   const handleDelete = (id: string) => {
