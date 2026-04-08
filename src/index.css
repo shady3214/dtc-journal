@@ -1904,19 +1904,27 @@ input[type="file"]::file-selector-button {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 60px;
+  gap: 6px;
+  height: 52px;
   font-size: 12px;
   font-weight: 600;
   color: var(--accent);
   text-decoration: none;
-  border: 1px dashed var(--border-hi);
+  border: 1px solid var(--border-hi);
   border-radius: 8px;
   margin-top: 8px;
-  transition: background 0.15s ease;
+  background: var(--accent-glow);
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .chart-link-card:hover {
-  background: var(--accent-glow);
+  background: var(--accent-glow-strong);
+  border-color: var(--accent);
+}
+
+.chart-link-card-icon {
+  font-size: 15px;
+  line-height: 1;
 }
 
 /* ── Lightbox (Full-screen Chart View) ─────────────────────── */

@@ -332,69 +332,152 @@ function MistakeTracker({ trades }: { trades: Trade[] }) {
 
 /* ── Export Section ─────────────────────────────────────────── */
 
+function buildAnalyticsLocal(trades: Trade[]) {
+  const pairData    = groupBy(trades, (t) => t.pair)
+  const sessionData = groupBy(trades, (t) => getSession(new Date(t.openedAt).getHours()))
+  const dayData     = groupBy(trades, (t) => getDayName(new Date(t.openedAt).getDay()))
+
+  const tagMap = new Map<string, Trade[]>()
+  for (const t of trades) {
+    for (const tag of t.tags) {
+      if (!tagMap.has(tag)) tagMap.set(tag, [])
+      tagMap.get(tag)!.push(t)
+    }
+  }
+  const tagData: GroupStats[] = Array.from(tagMap, ([key, list]) => {
+    const wins = list.filter((t) => t.pnl > 0).length
+    const totalPnl = list.reduce((s, t) => s + t.pnl, 0)
+    const pnls = list.map((t) => t.pnl)
+    return { key, trades: list.length, wins, losses: list.length - wins,
+      winRate: list.length ? (wins / list.length) * 100 : 0, totalPnl,
+      avgPnl: list.length ? totalPnl / list.length : 0,
+      bestTrade: Math.max(...pnls), worstTrade: Math.min(...pnls) }
+  }).sort((a, b) => b.totalPnl - a.totalPnl)
+
+  const mistakeMap = new Map<string, { count: number; totalCost: number }>()
+  for (const t of trades) {
+    for (const m of (t.mistakes || [])) {
+      const prev = mistakeMap.get(m) || { count: 0, totalCost: 0 }
+      mistakeMap.set(m, { count: prev.count + 1, totalCost: prev.totalCost + (t.pnl < 0 ? Math.abs(t.pnl) : 0) })
+    }
+  }
+  const mistakeData = Array.from(mistakeMap, ([name, v]) => ({ name, count: v.count, totalCost: v.totalCost, avgCost: v.count ? v.totalCost / v.count : 0 }))
+    .sort((a, b) => b.totalCost - a.totalCost)
+
+  return { pairData, tagData, sessionData, dayData, mistakeData }
+}
+
+function perfTableHtml(title: string, data: GroupStats[]) {
+  if (!data.length) return ''
+  const rows = data.map((d) =>
+    `<tr><td><b>${d.key}</b></td><td>${d.trades}</td><td>${d.wins}</td><td>${d.losses}</td>` +
+    `<td>${d.winRate.toFixed(1)}%</td><td class="${d.totalPnl >= 0 ? 'pos' : 'neg'}">$${d.totalPnl.toFixed(2)}</td>` +
+    `<td class="${d.avgPnl >= 0 ? 'pos' : 'neg'}">$${d.avgPnl.toFixed(2)}</td>` +
+    `<td class="pos">$${d.bestTrade.toFixed(2)}</td><td class="neg">$${d.worstTrade.toFixed(2)}</td></tr>`
+  ).join('')
+  return `<h2>${title}</h2><table><thead><tr><th>Name</th><th>Trades</th><th>Wins</th><th>Losses</th><th>Win Rate</th><th>Total PnL</th><th>Avg PnL</th><th>Best</th><th>Worst</th></tr></thead><tbody>${rows}</tbody></table>`
+}
+
 function ExportSection({ trades }: { trades: Trade[] }) {
   const [excelExporting, setExcelExporting] = useState(false)
 
   const exportCSV = () => {
-    const headers = ['Date', 'Pair', 'Direction', 'Entry', 'Stop Loss', 'Take Profit', 'Lot Size', 'PnL', 'Return %', 'Commission', 'Capital', 'Risk %', 'Status', 'Tags', 'Mistakes', 'Notes']
-    const rows = trades.map((t) => [
-      new Date(t.openedAt).toLocaleDateString(),
-      t.pair,
-      t.direction,
-      t.entry,
-      t.stopLoss,
-      t.takeProfit,
-      t.lotSize,
-      t.pnl,
-      t.returnPercent,
+    const { pairData, tagData, sessionData, dayData, mistakeData } = buildAnalyticsLocal(trades)
+
+    const sections: string[] = []
+
+    // Trades
+    const tradeHeaders = ['Date', 'Pair', 'Direction', 'Entry', 'SL', 'TP', 'Lots', 'Capital', 'Risk %', 'PnL', 'Return %', 'Commission', 'Status', 'Tags', 'Mistakes', 'Chart Link', 'Notes']
+    const tradeRows = trades.map((t) => [
+      new Date(t.openedAt).toLocaleDateString(), t.pair, t.direction,
+      t.entry, t.stopLoss, t.takeProfit, t.lotSize, t.capital, t.riskPercent,
+      t.pnl, t.returnPercent,
       t.enableCommission ? t.commissionPerLot * t.lotSize * 2 : 0,
-      t.capital,
-      t.riskPercent,
-      t.status,
-      t.tags.join('; '),
-      (t.mistakes || []).join('; '),
-      t.notesHtml.replace(/"/g, '""'),
+      t.status, t.tags.join('; '), (t.mistakes || []).join('; '),
+      t.chartLink || '',
+      t.notesHtml.replace(/<[^>]*>/g, '').replace(/"/g, '""'),
     ])
-    const csv = [headers.join(','), ...rows.map((r) => r.map((v) => `"${v}"`).join(','))].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    sections.push('TRADE HISTORY')
+    sections.push(tradeHeaders.join(','))
+    sections.push(...tradeRows.map((r) => r.map((v) => `"${v}"`).join(',')))
+
+    // Performance group helper
+    const groupHeaders = ['Name', 'Trades', 'Wins', 'Losses', 'Win Rate %', 'Total PnL', 'Avg PnL', 'Best Trade', 'Worst Trade']
+    const groupRows = (data: GroupStats[]) => data.map((d) => [
+      d.key, d.trades, d.wins, d.losses,
+      d.winRate.toFixed(1), d.totalPnl.toFixed(2), d.avgPnl.toFixed(2),
+      d.bestTrade.toFixed(2), d.worstTrade.toFixed(2),
+    ].map((v) => `"${v}"`).join(','))
+
+    sections.push('', 'PAIR PERFORMANCE', groupHeaders.join(','), ...groupRows(pairData))
+    sections.push('', 'SETUP / TAG PERFORMANCE', groupHeaders.join(','), ...groupRows(tagData))
+    sections.push('', 'SESSION ANALYSIS', groupHeaders.join(','), ...groupRows(sessionData))
+    sections.push('', 'DAY OF WEEK', groupHeaders.join(','), ...groupRows(dayData))
+    sections.push('', 'MISTAKE TRACKER', '"Mistake","Count","Total Cost","Avg Cost"')
+    sections.push(...mistakeData.map((d) => `"${d.name}","${d.count}","${d.totalCost.toFixed(2)}","${d.avgCost.toFixed(2)}"`))
+
+    const blob = new Blob([sections.join('\n')], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `trades-${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `dtc-journal-full-${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
 
   const exportPDF = () => {
-    const wins = trades.filter((t) => t.pnl > 0).length
+    const wins = trades.filter((t) => t.pnl > 0)
+    const losses = trades.filter((t) => t.pnl < 0)
     const totalPnl = trades.reduce((s, t) => s + t.pnl, 0)
-    const winRate = trades.length ? ((wins / trades.length) * 100).toFixed(1) : '0'
+    const winRate = trades.length ? ((wins.length / trades.length) * 100).toFixed(1) : '0'
+    const grossWin = wins.reduce((s, t) => s + t.pnl, 0)
+    const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0))
+    const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : 'N/A'
+    const { pairData, tagData, sessionData, dayData, mistakeData } = buildAnalyticsLocal(trades)
+
     const w = window.open('', '_blank')
     if (!w) return
     w.document.write(`<!DOCTYPE html><html><head><title>Trade Journal Export</title>
 <style>
-  body{font-family:Arial,sans-serif;padding:24px;color:#1a1a1a}
-  table{width:100%;border-collapse:collapse;margin-top:16px;font-size:12px}
-  th,td{border:1px solid #ddd;padding:6px 10px;text-align:left}
+  body{font-family:Arial,sans-serif;padding:24px;color:#1a1a1a;font-size:13px}
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}
+  th,td{border:1px solid #ddd;padding:5px 9px;text-align:left}
   th{background:#f0f0f0;font-size:11px;text-transform:uppercase;letter-spacing:0.5px}
   .pos{color:#16a34a}.neg{color:#dc2626}
-  h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:20px 0 8px}
-  .summary{display:flex;gap:24px;margin:12px 0}
-  .summary div{font-size:13px}.summary strong{font-size:18px;display:block}
+  h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:24px 0 8px;border-bottom:2px solid #e5e7eb;padding-bottom:4px}
+  .summary{display:flex;gap:28px;margin:12px 0 20px;flex-wrap:wrap}
+  .summary div{font-size:13px;background:#f9fafb;padding:10px 16px;border-radius:8px;border:1px solid #e5e7eb}
+  .summary strong{font-size:20px;display:block;margin-bottom:2px}
+  @media print{body{padding:12px}}
 </style></head><body>
 <h1>Forex Trade Journal</h1>
-<p style="color:#666">Exported ${new Date().toLocaleDateString()}</p>
+<p style="color:#888;margin:2px 0 16px">Exported ${new Date().toLocaleDateString()}</p>
 <div class="summary">
   <div><strong>${trades.length}</strong>Total Trades</div>
   <div><strong>${winRate}%</strong>Win Rate</div>
   <div class="${totalPnl >= 0 ? 'pos' : 'neg'}"><strong>$${totalPnl.toFixed(2)}</strong>Total PnL</div>
+  <div class="pos"><strong>$${grossWin.toFixed(2)}</strong>Gross Profit</div>
+  <div class="neg"><strong>-$${grossLoss.toFixed(2)}</strong>Gross Loss</div>
+  <div><strong>${profitFactor}</strong>Profit Factor</div>
 </div>
+
+${perfTableHtml('Pair Performance', pairData)}
+${perfTableHtml('Setup / Tag Performance', tagData)}
+${perfTableHtml('Session Analysis', sessionData)}
+${perfTableHtml('Day of Week Performance', dayData)}
+
+<h2>Mistake Tracker</h2>
+${mistakeData.length ? `<table><thead><tr><th>Mistake</th><th>Count</th><th>Total Cost</th><th>Avg Cost</th></tr></thead><tbody>
+${mistakeData.map((d) => `<tr><td><b>${d.name}</b></td><td>${d.count}</td><td class="neg">$${d.totalCost.toFixed(2)}</td><td class="neg">$${d.avgCost.toFixed(2)}</td></tr>`).join('')}
+</tbody></table>` : '<p style="color:#888">No mistakes logged.</p>'}
+
 <h2>Trade History</h2>
-<table><thead><tr><th>Date</th><th>Pair</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP</th><th>Lots</th><th>PnL</th><th>Tags</th><th>Mistakes</th></tr></thead><tbody>
-${trades.sort((a, b) => b.openedAt.localeCompare(a.openedAt)).map((t) =>
-  `<tr><td>${new Date(t.openedAt).toLocaleDateString()}</td><td>${t.pair}</td><td>${t.direction}</td><td>${t.entry}</td><td>${t.stopLoss}</td><td>${t.takeProfit}</td><td>${t.lotSize}</td><td class="${t.pnl >= 0 ? 'pos' : 'neg'}">$${t.pnl.toFixed(2)}</td><td>${t.tags.join(', ')}</td><td>${(t.mistakes || []).join(', ')}</td></tr>`
+<table><thead><tr><th>Date</th><th>Pair</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP</th><th>Lots</th><th>PnL</th><th>Return%</th><th>Tags</th><th>Mistakes</th></tr></thead><tbody>
+${[...trades].sort((a, b) => b.openedAt.localeCompare(a.openedAt)).map((t) =>
+  `<tr><td>${new Date(t.openedAt).toLocaleDateString()}</td><td>${t.pair}</td><td>${t.direction}</td><td>${t.entry}</td><td>${t.stopLoss}</td><td>${t.takeProfit}</td><td>${t.lotSize}</td><td class="${t.pnl >= 0 ? 'pos' : 'neg'}">$${t.pnl.toFixed(2)}</td><td class="${t.returnPercent >= 0 ? 'pos' : 'neg'}">${t.returnPercent.toFixed(2)}%</td><td>${t.tags.join(', ')}</td><td>${(t.mistakes || []).join(', ')}</td></tr>`
 ).join('')}
-</tbody></table></body></html>`)
+</tbody></table>
+</body></html>`)
     w.document.close()
     setTimeout(() => w.print(), 500)
   }
@@ -402,10 +485,10 @@ ${trades.sort((a, b) => b.openedAt.localeCompare(a.openedAt)).map((t) =>
   return (
     <div className="card analytics-section">
       <h3>Export</h3>
-      <p className="muted" style={{ marginBottom: 14 }}>Export your trade data for record-keeping, tax, or mentor review.</p>
+      <p className="muted" style={{ marginBottom: 14 }}>Export your full analytics — trades, pair/session/day performance, mistakes, and more.</p>
       <div className="export-btns">
         <button className="btn-primary" onClick={exportCSV} disabled={trades.length === 0}>
-          Export CSV
+          Export CSV (Full)
         </button>
         <button className="btn-secondary" onClick={exportPDF} disabled={trades.length === 0}>
           Export PDF (Print)
@@ -427,7 +510,7 @@ ${trades.sort((a, b) => b.openedAt.localeCompare(a.openedAt)).map((t) =>
             }
           }}
         >
-          {excelExporting ? 'Exporting...' : 'Export Excel'}
+          {excelExporting ? 'Exporting...' : 'Export Excel (Full)'}
         </button>
       </div>
     </div>
