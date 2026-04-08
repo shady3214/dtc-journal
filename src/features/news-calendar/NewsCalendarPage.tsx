@@ -24,7 +24,7 @@ const IMPACT_COLOR: Record<string, string> = {
   High:    '#ef4444',
   Medium:  '#f59e0b',
   Low:     '#3b82f6',
-  Holiday: '#6b7280',
+  Holiday: '#60a5fa',
 }
 
 const FF_THIS_WEEK = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json'
@@ -86,14 +86,13 @@ async function fetchAllEvents(): Promise<FfEvent[]> {
 // ── Day detail modal ───────────────────────────────────────────────
 
 function DayModal({
-  day,
   dateStr,
   events,
   pnlData,
   tab,
   onClose,
 }: {
-  day: number
+  day?: number
   dateStr: string
   events: FfEvent[]
   pnlData?: { pnl: number; trades: number }
@@ -305,9 +304,10 @@ export function NewsCalendarPage() {
             const isToday = dateStr === todayStr
 
             // Count by impact for badges
-            const highCount   = events.filter((e) => e.impact === 'High').length
-            const medCount    = events.filter((e) => e.impact === 'Medium').length
-            const lowCount    = events.filter((e) => e.impact === 'Low').length
+            const highCount    = events.filter((e) => e.impact === 'High').length
+            const medCount     = events.filter((e) => e.impact === 'Medium').length
+            const lowCount     = events.filter((e) => e.impact === 'Low').length
+            const holidayCount = events.filter((e) => e.impact === 'Holiday').length
 
             // Cell border color driven by highest impact present
             let borderClass = ''
@@ -358,6 +358,11 @@ export function NewsCalendarPage() {
                           {lowCount}
                         </span>
                       )}
+                      {holidayCount > 0 && (
+                        <span className="ec-dot-badge" style={{ background: IMPACT_COLOR.Holiday }}>
+                          {holidayCount}
+                        </span>
+                      )}
                     </div>
 
                     {/* Preview event titles */}
@@ -403,6 +408,10 @@ export function NewsCalendarPage() {
               <span className="ec-legend-item">
                 <span className="ec-legend-dot" style={{ background: IMPACT_COLOR.Low }} />
                 Low Impact
+              </span>
+              <span className="ec-legend-item">
+                <span className="ec-legend-dot" style={{ background: IMPACT_COLOR.Holiday }} />
+                Holiday
               </span>
             </>
           ) : (

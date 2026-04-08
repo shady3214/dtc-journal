@@ -2,6 +2,16 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 
 const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
 
+const FAV_KEY = 'journal-fav-pairs'
+
+function loadFavs(): string[] {
+  try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]') } catch { return [] }
+}
+
+function saveFavs(favs: string[]) {
+  localStorage.setItem(FAV_KEY, JSON.stringify(favs))
+}
+
 /** Strip HTML tags like <em>...</em> from TradingView search results */
 function stripHtml(str: string): string {
   return str.replace(/<\/?[^>]+(>|$)/g, '')
@@ -20,7 +30,7 @@ interface Props {
   placeholder?: string
 }
 
-const TYPE_FILTERS = ['All', 'Forex', 'Crypto', 'Stock', 'Index', 'Futures'] as const
+const TYPE_FILTERS = ['All', 'Forex', 'Crypto', 'Index', 'Futures'] as const
 
 export function SymbolSearch({ value, onChange, placeholder }: Props) {
   const [query, setQuery] = useState(value)
@@ -29,6 +39,7 @@ export function SymbolSearch({ value, onChange, placeholder }: Props) {
   const [loading, setLoading] = useState(false)
   const [activeFilter, setActiveFilter] = useState<string>('All')
   const [highlightIdx, setHighlightIdx] = useState(-1)
+  const [favs, setFavs] = useState<string[]>(loadFavs)
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -48,6 +59,15 @@ export function SymbolSearch({ value, onChange, placeholder }: Props) {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
+
+  const toggleFav = (sym: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setFavs((prev) => {
+      const next = prev.includes(sym) ? prev.filter((f) => f !== sym) : [...prev, sym]
+      saveFavs(next)
+      return next
+    })
+  }
 
   const search = useCallback(async (text: string, typeFilter: string) => {
     if (text.length < 1) {
@@ -94,10 +114,10 @@ export function SymbolSearch({ value, onChange, placeholder }: Props) {
     debounceRef.current = setTimeout(() => search(text, activeFilter), 250)
   }
 
-  const handleSelect = (r: SymbolResult) => {
-    const sym = r.symbol.replace('/', '')
-    setQuery(sym)
-    onChange(sym, r)
+  const handleSelect = (sym: string, result?: SymbolResult) => {
+    const clean = sym.replace('/', '')
+    setQuery(clean)
+    onChange(clean, result)
     setOpen(false)
   }
 
@@ -116,7 +136,7 @@ export function SymbolSearch({ value, onChange, placeholder }: Props) {
       setHighlightIdx((i) => Math.max(i - 1, 0))
     } else if (e.key === 'Enter' && highlightIdx >= 0 && results[highlightIdx]) {
       e.preventDefault()
-      handleSelect(results[highlightIdx])
+      handleSelect(results[highlightIdx].symbol, results[highlightIdx])
     } else if (e.key === 'Escape') {
       setOpen(false)
     }
@@ -139,7 +159,7 @@ export function SymbolSearch({ value, onChange, placeholder }: Props) {
         className="symbol-search-input"
         value={query}
         onChange={(e) => handleInput(e.target.value)}
-        onFocus={() => { if (query.length >= 1) { setOpen(true); search(query, activeFilter) } }}
+        onFocus={() => { if (query.length >= 1) { setOpen(true); search(query, activeFilter) } else { setOpen(true) } }}
         onKeyDown={handleKeyDown}
         placeholder={placeholder || 'Search symbol...'}
         autoComplete="off"
@@ -162,6 +182,32 @@ export function SymbolSearch({ value, onChange, placeholder }: Props) {
             ))}
           </div>
 
+          {/* Favourites section */}
+          {favs.length > 0 && (
+            <div className="symbol-favs-section">
+              <div className="symbol-favs-label">Favourites</div>
+              <div className="symbol-favs-list">
+                {favs.map((sym) => (
+                  <button
+                    key={sym}
+                    className="symbol-fav-chip"
+                    onClick={() => handleSelect(sym)}
+                    type="button"
+                  >
+                    {sym}
+                    <span
+                      className="symbol-fav-remove"
+                      onClick={(e) => toggleFav(sym, e)}
+                      title="Remove from favourites"
+                    >
+                      ×
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Column headers */}
           <div className="symbol-list-header">
             <span>Symbol</span>
@@ -175,11 +221,14 @@ export function SymbolSearch({ value, onChange, placeholder }: Props) {
             {!loading && results.length === 0 && query.length >= 1 && (
               <div className="symbol-list-empty">No results found</div>
             )}
+            {!loading && query.length < 1 && results.length === 0 && favs.length === 0 && (
+              <div className="symbol-list-empty">Type to search symbols…</div>
+            )}
             {!loading && results.map((r, i) => (
               <button
                 key={`${r.exchange}:${r.symbol}-${i}`}
                 className={`symbol-list-item ${i === highlightIdx ? 'highlighted' : ''}`}
-                onClick={() => handleSelect(r)}
+                onClick={() => handleSelect(r.symbol, r)}
                 onMouseEnter={() => setHighlightIdx(i)}
                 type="button"
               >
@@ -188,6 +237,14 @@ export function SymbolSearch({ value, onChange, placeholder }: Props) {
                 <span className="symbol-list-meta">
                   <span className="symbol-type-badge">{typeLabel(r.type)}</span>
                   <span className="symbol-exchange">{r.exchange}</span>
+                  <button
+                    type="button"
+                    className={`symbol-fav-btn ${favs.includes(r.symbol.replace('/', '')) ? 'active' : ''}`}
+                    onClick={(e) => toggleFav(r.symbol.replace('/', ''), e)}
+                    title={favs.includes(r.symbol.replace('/', '')) ? 'Remove from favourites' : 'Add to favourites'}
+                  >
+                    ♥
+                  </button>
                 </span>
               </button>
             ))}

@@ -18,6 +18,8 @@ const THEMES: { id: ThemeName; color: string; label: string }[] = [
   { id: 'ember', color: '#f59e0b', label: 'Ember' },
   { id: 'crimson', color: '#f43f5e', label: 'Crimson' },
   { id: 'phantom', color: '#a855f7', label: 'Phantom' },
+  { id: 'white', color: '#0ea5e9', label: 'White' },
+  { id: 'amoled', color: '#00e5ff', label: 'AMOLED' },
 ]
 
 export function SettingsPage() {

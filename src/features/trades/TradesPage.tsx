@@ -13,7 +13,7 @@ const MISTAKE_CATEGORIES = [
   'Emotional', 'Ignored Rules', 'Poor R:R',
 ]
 
-function makeEmptyTrade(): Trade {
+function makeEmptyTrade(capitalOverride?: number): Trade {
   const settings = loadSettings()
   return {
     id: '',
@@ -23,7 +23,7 @@ function makeEmptyTrade(): Trade {
     stopLoss: 0,
     takeProfit: 0,
     lotSize: 0,
-    capital: settings.defaultCapital || 1000,
+    capital: capitalOverride ?? settings.defaultCapital ?? 1000,
     enableCommission: settings.defaultCommissionPerLot > 0,
     commissionPerLot: settings.defaultCommissionPerLot || 0,
     riskPercent: settings.defaultRiskPercent || 1,
@@ -34,6 +34,7 @@ function makeEmptyTrade(): Trade {
     mistakes: [],
     setup: '',
     chartImageData: '',
+    chartLink: '',
     notesHtml: '',
     openedAt: new Date().toISOString(),
   }
@@ -75,10 +76,16 @@ export function TradesPage() {
   const q = useQueryClient()
   const location = useLocation()
   const navigate = useNavigate()
-  const { refreshKey } = useAccount()
+  const { refreshKey, activeAccount } = useAccount()
   const editTrade = (location.state as any)?.trade as Trade | undefined
 
-  const [form, setForm] = useState<Trade>(() => editTrade ? { ...editTrade, mistakes: editTrade.mistakes || [] } : makeEmptyTrade())
+  const activeCapital = activeAccount?.capital
+
+  const [form, setForm] = useState<Trade>(() =>
+    editTrade
+      ? { ...editTrade, mistakes: editTrade.mistakes || [], chartLink: editTrade.chartLink || '' }
+      : makeEmptyTrade(activeCapital)
+  )
   const [preview, setPreview] = useState('')
   const [notice, setNotice] = useState('')
   const [ai, setAi] = useState<AiAnalysis | null>(null)
@@ -88,6 +95,8 @@ export function TradesPage() {
   const [tagInput, setTagInput] = useState('')
   const [fetchingPrice, setFetchingPrice] = useState(false)
   const [symbolType, setSymbolType] = useState('')
+  const [directPnl, setDirectPnl] = useState(false)
+  const [directPnlValue, setDirectPnlValue] = useState('')
   const isEditing = !!form.id
 
   // Decimal precision for price inputs based on current pair
@@ -97,12 +106,14 @@ export function TradesPage() {
   // If navigated here with a trade to edit, populate the form
   useEffect(() => {
     if (editTrade) {
-      setForm({ ...editTrade, mistakes: editTrade.mistakes || [] })
+      setForm({ ...editTrade, mistakes: editTrade.mistakes || [], chartLink: editTrade.chartLink || '' })
       setPreview('')
       setAi(editTrade.aiAnalysis || null)
       setAiError('')
       setTagInput('')
       setSymbolType('')
+      setDirectPnl(false)
+      setDirectPnlValue('')
       // Clear the router state so a refresh doesn't re-populate
       window.history.replaceState({}, '')
     }
@@ -119,6 +130,21 @@ export function TradesPage() {
   // ── Auto-calculations ──────────────────────────────────────
 
   const calc = useMemo(() => {
+    if (directPnl) {
+      const pnl = parseFloat(directPnlValue) || 0
+      const returnPercent = form.capital > 0 ? (pnl / form.capital) * 100 : 0
+      return {
+        lotSize: 0,
+        pnl: Math.round(pnl * 100) / 100,
+        returnPercent: Math.round(returnPercent * 100) / 100,
+        riskAmount: 0,
+        slPips: 0,
+        tpPips: 0,
+        commission: 0,
+        rr: 0,
+      }
+    }
+
     const pip = pipSize(form.pair)
     const slDistance = Math.abs(form.entry - form.stopLoss)
     const tpDistance = Math.abs(form.takeProfit - form.entry)
@@ -158,7 +184,7 @@ export function TradesPage() {
       commission: Math.round(commission * 100) / 100,
       rr: slPips > 0 ? Math.round((tpPips / slPips) * 100) / 100 : 0,
     }
-  }, [form.pair, form.entry, form.stopLoss, form.takeProfit, form.capital, form.riskPercent, form.direction, form.enableCommission, form.commissionPerLot])
+  }, [directPnl, directPnlValue, form.pair, form.entry, form.stopLoss, form.takeProfit, form.capital, form.riskPercent, form.direction, form.enableCommission, form.commissionPerLot])
 
   // ── Tag helpers ────────────────────────────────────────────
 
@@ -197,20 +223,36 @@ export function TradesPage() {
   // ── Form actions ───────────────────────────────────────────
 
   const resetForm = () => {
-    setForm({ ...makeEmptyTrade(), openedAt: new Date().toISOString() })
+    setForm({ ...makeEmptyTrade(activeCapital), openedAt: new Date().toISOString() })
     setPreview('')
     setAi(null)
     setAiError('')
     setTagInput('')
+    setDirectPnl(false)
+    setDirectPnlValue('')
   }
 
-  const tradeToSave = (): Trade => ({
-    ...form,
-    id: form.id || crypto.randomUUID(),
-    lotSize: calc.lotSize,
-    pnl: calc.pnl,
-    returnPercent: calc.returnPercent,
-  })
+  const tradeToSave = (): Trade => {
+    if (directPnl) {
+      return {
+        ...form,
+        id: form.id || crypto.randomUUID(),
+        lotSize: 0,
+        pnl: calc.pnl,
+        returnPercent: calc.returnPercent,
+        entry: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+      }
+    }
+    return {
+      ...form,
+      id: form.id || crypto.randomUUID(),
+      lotSize: calc.lotSize,
+      pnl: calc.pnl,
+      returnPercent: calc.returnPercent,
+    }
+  }
 
   const save = useMutation({
     mutationFn: () => getApi().saveTrade(tradeToSave()),
@@ -301,47 +343,84 @@ export function TradesPage() {
           </select>
         </label>
 
-        {/* Row 2: Entry + SL + TP */}
-        <label className="field">
-          <span>{fetchingPrice ? 'Entry Price (fetching...)' : 'Entry Price'}</span>
-          <input
-            type="number"
-            step={priceStep}
-            value={form.entry ? form.entry.toFixed(pricePrecision) : ''}
-            onChange={(e) => setForm({ ...form, entry: Number(e.target.value) })}
-            placeholder={'0.' + '0'.repeat(pricePrecision)}
-          />
-        </label>
-        <label className="field">
-          <span>Stop Loss</span>
-          <input
-            type="number"
-            step={priceStep}
-            value={form.stopLoss ? form.stopLoss.toFixed(pricePrecision) : ''}
-            onChange={(e) => setForm({ ...form, stopLoss: Number(e.target.value) })}
-            placeholder={'0.' + '0'.repeat(pricePrecision)}
-          />
-        </label>
-        <label className="field">
-          <span>Take Profit</span>
-          <input
-            type="number"
-            step={priceStep}
-            value={form.takeProfit ? form.takeProfit.toFixed(pricePrecision) : ''}
-            onChange={(e) => setForm({ ...form, takeProfit: Number(e.target.value) })}
-            placeholder={'0.' + '0'.repeat(pricePrecision)}
-          />
-        </label>
+        {/* Direct P&L toggle */}
+        <div className="field field-wide">
+          <span>Direct P&amp;L Input</span>
+          <div className="toggle-row">
+            <button
+              type="button"
+              className={`toggle-btn ${directPnl ? 'toggle-on' : ''}`}
+              onClick={() => setDirectPnl((v) => !v)}
+            >
+              <span className="toggle-thumb" />
+            </button>
+            <span className="muted" style={{ fontSize: '0.82rem' }}>
+              {directPnl ? 'Enter P&L directly — Entry/SL/TP hidden' : 'Calculate from Entry / SL / TP'}
+            </span>
+          </div>
+        </div>
+
+        {/* Row 2: Entry + SL + TP (hidden in direct P&L mode) */}
+        {!directPnl && (
+          <>
+            <label className="field">
+              <span>{fetchingPrice ? 'Entry Price (fetching...)' : 'Entry Price'}</span>
+              <input
+                type="number"
+                step={priceStep}
+                value={form.entry ? form.entry.toFixed(pricePrecision) : ''}
+                onChange={(e) => setForm({ ...form, entry: Number(e.target.value) })}
+                placeholder={'0.' + '0'.repeat(pricePrecision)}
+              />
+            </label>
+            <label className="field">
+              <span>Stop Loss</span>
+              <input
+                type="number"
+                step={priceStep}
+                value={form.stopLoss ? form.stopLoss.toFixed(pricePrecision) : ''}
+                onChange={(e) => setForm({ ...form, stopLoss: Number(e.target.value) })}
+                placeholder={'0.' + '0'.repeat(pricePrecision)}
+              />
+            </label>
+            <label className="field">
+              <span>Take Profit</span>
+              <input
+                type="number"
+                step={priceStep}
+                value={form.takeProfit ? form.takeProfit.toFixed(pricePrecision) : ''}
+                onChange={(e) => setForm({ ...form, takeProfit: Number(e.target.value) })}
+                placeholder={'0.' + '0'.repeat(pricePrecision)}
+              />
+            </label>
+          </>
+        )}
+
+        {/* Direct P&L amount input */}
+        {directPnl && (
+          <label className="field">
+            <span>P&amp;L ($)</span>
+            <input
+              type="number"
+              step="any"
+              value={directPnlValue}
+              onChange={(e) => setDirectPnlValue(e.target.value)}
+              placeholder="e.g. 120.50 or -45.00"
+            />
+          </label>
+        )}
 
         {/* Row 3: Capital + Risk */}
         <label className="field">
           <span>Capital ($)</span>
           <input type="number" step="any" value={form.capital || ''} onChange={(e) => setForm({ ...form, capital: Number(e.target.value) })} placeholder="1000" />
         </label>
-        <label className="field">
-          <span>Risk %</span>
-          <input type="number" step="any" value={form.riskPercent || ''} onChange={(e) => setForm({ ...form, riskPercent: Number(e.target.value) })} placeholder="1" />
-        </label>
+        {!directPnl && (
+          <label className="field">
+            <span>Risk %</span>
+            <input type="number" step="any" value={form.riskPercent || ''} onChange={(e) => setForm({ ...form, riskPercent: Number(e.target.value) })} placeholder="1" />
+          </label>
+        )}
         <label className="field">
           <span>Status</span>
           <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
@@ -361,65 +440,71 @@ export function TradesPage() {
         </label>
 
         {/* Commission toggle */}
-        <div className="field">
-          <span>Commission</span>
-          <div className="toggle-row">
-            <button
-              type="button"
-              className={`toggle-btn ${form.enableCommission ? 'toggle-on' : ''}`}
-              onClick={() => setForm({ ...form, enableCommission: !form.enableCommission })}
-            >
-              <span className="toggle-thumb" />
-            </button>
-            {form.enableCommission && (
-              <input
-                type="number"
-                step="any"
-                value={form.commissionPerLot || ''}
-                onChange={(e) => setForm({ ...form, commissionPerLot: Number(e.target.value) })}
-                placeholder="$ per lot"
-                style={{ flex: 1 }}
-              />
-            )}
+        {!directPnl && (
+          <div className="field">
+            <span>Commission</span>
+            <div className="toggle-row">
+              <button
+                type="button"
+                className={`toggle-btn ${form.enableCommission ? 'toggle-on' : ''}`}
+                onClick={() => setForm({ ...form, enableCommission: !form.enableCommission })}
+              >
+                <span className="toggle-thumb" />
+              </button>
+              {form.enableCommission && (
+                <input
+                  type="number"
+                  step="any"
+                  value={form.commissionPerLot || ''}
+                  onChange={(e) => setForm({ ...form, commissionPerLot: Number(e.target.value) })}
+                  placeholder="$ per lot"
+                  style={{ flex: 1 }}
+                />
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Auto-calculated summary */}
       {(calc.lotSize > 0 || calc.pnl !== 0) && (
         <div className="calc-summary">
-          <div className="calc-item">
-            <span className="calc-label">Lot Size</span>
-            <span className="calc-value">{calc.lotSize}</span>
-          </div>
-          <div className="calc-item">
-            <span className="calc-label">SL Pips</span>
-            <span className="calc-value">{calc.slPips}</span>
-          </div>
-          <div className="calc-item">
-            <span className="calc-label">TP Pips</span>
-            <span className="calc-value">{calc.tpPips}</span>
-          </div>
-          <div className="calc-item">
-            <span className="calc-label">R:R</span>
-            <span className="calc-value">{calc.rr}</span>
-          </div>
-          <div className="calc-item">
-            <span className="calc-label">Risk ($)</span>
-            <span className="calc-value">${calc.riskAmount}</span>
-          </div>
+          {!directPnl && (
+            <>
+              <div className="calc-item">
+                <span className="calc-label">Lot Size</span>
+                <span className="calc-value">{calc.lotSize}</span>
+              </div>
+              <div className="calc-item">
+                <span className="calc-label">SL Pips</span>
+                <span className="calc-value">{calc.slPips}</span>
+              </div>
+              <div className="calc-item">
+                <span className="calc-label">TP Pips</span>
+                <span className="calc-value">{calc.tpPips}</span>
+              </div>
+              <div className="calc-item">
+                <span className="calc-label">R:R</span>
+                <span className="calc-value">{calc.rr}</span>
+              </div>
+              <div className="calc-item">
+                <span className="calc-label">Risk ($)</span>
+                <span className="calc-value">${calc.riskAmount}</span>
+              </div>
+            </>
+          )}
           <div className="calc-item">
             <span className="calc-label">PnL</span>
             <span className={`calc-value ${calc.pnl >= 0 ? 'positive' : 'negative'}`}>${calc.pnl}</span>
           </div>
-          {form.enableCommission && calc.commission > 0 && (
+          {!directPnl && form.enableCommission && calc.commission > 0 && (
             <div className="calc-item">
               <span className="calc-label">Commission</span>
               <span className="calc-value" style={{ color: 'var(--negative)' }}>-${calc.commission}</span>
             </div>
           )}
           <div className="calc-item">
-            <span className="calc-label">Return</span>
+            <span className="calc-label">Return (% of Account)</span>
             <span className={`calc-value ${calc.returnPercent >= 0 ? 'positive' : 'negative'}`}>{calc.returnPercent}%</span>
           </div>
         </div>
@@ -469,6 +554,27 @@ export function TradesPage() {
         <textarea rows={3} value={form.notesHtml} onChange={(e) => setForm({ ...form, notesHtml: e.target.value })} placeholder="Trade notes, reasoning, lessons learned..." />
       </div>
 
+      {/* Chart link */}
+      <div className="field field-wide" style={{ marginTop: 12 }}>
+        <span>Chart Link (TradingView or any URL)</span>
+        <input
+          type="url"
+          value={form.chartLink || ''}
+          onChange={(e) => setForm({ ...form, chartLink: e.target.value })}
+          placeholder="https://www.tradingview.com/x/..."
+        />
+        {form.chartLink && (
+          <a
+            href={form.chartLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="chart-link-preview"
+          >
+            Open chart →
+          </a>
+        )}
+      </div>
+
       {/* Chart upload */}
       <div className="field field-wide" style={{ marginTop: 12 }}>
         <span>Upload Chart Screenshot</span>
@@ -507,7 +613,7 @@ export function TradesPage() {
           )}
           {ai.riskFeedback && (
             <div className="analysis-field">
-              <span className="label">Risk & Recommendations</span>
+              <span className="label">Risk &amp; Recommendations</span>
               <p>{ai.riskFeedback}</p>
             </div>
           )}

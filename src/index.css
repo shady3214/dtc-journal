@@ -12,6 +12,9 @@
   /* Cursor glow tracking */
   --cursor-x: -9999px;
   --cursor-y: -9999px;
+
+  /* Smooth theme colour transitions */
+  transition: background-color 0.25s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
 /* ── Theme: Obsidian (Default) ─────────────────────────────── */
@@ -1146,6 +1149,95 @@ input[type="file"]::file-selector-button {
   font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
+}
+
+/* Favourite heart button inside each result row */
+.symbol-fav-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 0 2px;
+  line-height: 1;
+  transition: color 0.15s ease;
+}
+
+.symbol-fav-btn:hover {
+  color: #f43f5e;
+}
+
+.symbol-fav-btn.active {
+  color: #f43f5e;
+}
+
+/* Favourites section inside dropdown */
+.symbol-favs-section {
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.symbol-favs-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.symbol-favs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.symbol-fav-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent-glow);
+  border: 1px solid var(--border-hi);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.symbol-fav-chip:hover {
+  background: var(--accent-glow-strong);
+  border-color: var(--accent);
+}
+
+.symbol-fav-remove {
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 1px;
+}
+
+.symbol-fav-remove:hover {
+  color: #f43f5e;
+}
+
+/* Chart link preview */
+.chart-link-preview {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+  transition: opacity 0.15s;
+}
+
+.chart-link-preview:hover {
+  opacity: 0.75;
+  text-decoration: underline;
 }
 
 /* ── Table / Trade Rows ─────────────────────────────────────── */

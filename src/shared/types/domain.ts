@@ -17,6 +17,7 @@ export interface Trade {
   mistakes: string[]
   setup?: string
   chartImageData?: string
+  chartLink?: string
   notesHtml: string
   openedAt: string
   closedAt?: string
