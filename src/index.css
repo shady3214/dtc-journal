@@ -1655,7 +1655,6 @@ input[type="file"]::file-selector-button {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  flex: 1;
 }
 
 .trade-row-info {
