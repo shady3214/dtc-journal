@@ -15,6 +15,8 @@
     "fs:allow-app-write",
     "fs:allow-appdata-read",
     "fs:allow-appdata-write",
-    "fs:allow-mkdir"
+    "fs:allow-mkdir",
+    "shell:allow-open",
+    "deep-link:default"
   ]
 }

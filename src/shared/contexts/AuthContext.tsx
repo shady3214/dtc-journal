@@ -3,6 +3,8 @@ import type { ReactNode } from 'react'
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase, supabaseConfigured } from '../lib/supabase'
 
+const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
+
 interface AuthState {
   user: User | null
   session: Session | null
@@ -29,7 +31,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(supabaseConfigured)
 
   useEffect(() => {
-    // If Supabase is not configured, stay in local-only mode — no auth needed
     if (!supabaseConfigured) return
 
     // Get initial session
@@ -48,18 +49,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     )
 
-    return () => subscription.unsubscribe()
+    // In Tauri: listen for deep link callbacks (dtcjournal://auth/callback#access_token=...)
+    let unlistenDeepLink: (() => void) | null = null
+    if (isTauri) {
+      import('@tauri-apps/plugin-deep-link').then(({ onOpenUrl }) => {
+        onOpenUrl(async (urls: string[]) => {
+          for (const url of urls) {
+            if (url.startsWith('dtcjournal://')) {
+              const hash = url.split('#')[1]
+              if (hash) {
+                const params = new URLSearchParams(hash)
+                const accessToken = params.get('access_token')
+                const refreshToken = params.get('refresh_token')
+                if (accessToken && refreshToken) {
+                  await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+                }
+              }
+            }
+          }
+        }).then((fn: () => void) => { unlistenDeepLink = fn })
+      }).catch(() => {})
+    }
+
+    return () => {
+      subscription.unsubscribe()
+      unlistenDeepLink?.()
+    }
   }, [])
 
   const signInWithGoogle = useCallback(async () => {
     if (!supabaseConfigured) throw new Error('Supabase is not configured')
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin,
-      },
-    })
-    if (error) throw error
+    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
+
+    if (isTauri) {
+      // In Tauri: open OAuth in system browser, redirect back via deep link
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: 'dtcjournal://auth/callback',
+          skipBrowserRedirect: true,
+        },
+      })
+      if (error) throw error
+      if (data?.url) {
+        const { open } = await import('@tauri-apps/plugin-shell')
+        await open(data.url)
+      }
+    } else {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.origin },
+      })
+      if (error) throw error
+    }
   }, [])
 
   const signOut = useCallback(async () => {

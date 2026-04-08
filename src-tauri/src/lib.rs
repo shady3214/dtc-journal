@@ -9,6 +9,8 @@ pub fn run() {
     .plugin(tauri_plugin_process::init())
     .plugin(tauri_plugin_notification::init())
     .plugin(tauri_plugin_fs::init())
+    .plugin(tauri_plugin_shell::init())
+    .plugin(tauri_plugin_deep_link::init())
     .invoke_handler(tauri::generate_handler![
       commands::list_trades,
       commands::upsert_trade,

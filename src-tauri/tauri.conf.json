@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Forex Journal",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.dtc.journal",
   "build": {
     "frontendDist": "../dist",
@@ -33,11 +33,19 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "allowDowngrades": false
+    }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["dtcjournal"]
+      }
+    },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU5NDMzMkVCRDI3QTRFMTIKUldRU1RuclM2ekpENlV3MVlheHcyNEVYeTc2blFFaFdjbVBtUjJNaEhEMlg3RHZoSnkwbzQrRlcK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIzN0FDRjI4QjM1MTVBQjYKUldTMldsR3pLTTk2cy93TWVNNFFSSEdZektrUXEwdEQ4MjZLR00zbU93NVhlWmp6VERuWVZxUDMK",
       "endpoints": [
         "https://github.com/shady3214/dtc-journal/releases/latest/download/latest.json"
       ],

@@ -52,13 +52,6 @@ async function fsReadText(filename: string): Promise<string | null> {
   }
 }
 
-async function fsRemove(filename: string): Promise<void> {
-  if (!isTauri) return
-  try {
-    const { BaseDirectory, remove } = await import(/* @vite-ignore */ _fsPlugin)
-    await remove(filename, { baseDir: BaseDirectory.AppData })
-  } catch { /* file may not exist */ }
-}
 
 /** Write settings to both localStorage and AppData file (Tauri only). */
 export async function persistSettingsAsync(settings: AppSettings): Promise<void> {
@@ -86,7 +79,7 @@ export async function loadSettingsAsync(): Promise<AppSettings> {
 }
 
 function applySettingsMigrations(parsed: AppSettings): AppSettings {
-  if (parsed.theme === 'dark' || parsed.theme === 'light') {
+  if ((parsed.theme as string) === 'dark' || (parsed.theme as string) === 'light') {
     parsed.theme = 'obsidian'
   }
   if (!parsed.accounts || !Array.isArray(parsed.accounts) || parsed.accounts.length === 0) {
@@ -97,34 +90,6 @@ function applySettingsMigrations(parsed: AppSettings): AppSettings {
     parsed.activeAccountId = parsed.accounts[0]?.id || DEFAULT_ACCOUNT_ID
   }
   return parsed
-}
-
-/** Write journal entries to both localStorage and AppData file (Tauri only). */
-async function persistJournalEntriesAsync(entries: Record<string, JournalEntry>, acctId: string): Promise<void> {
-  const key = acctId === DEFAULT_ACCOUNT_ID ? JOURNAL_KEY : `${JOURNAL_KEY}_${acctId}`
-  const filename = acctId === DEFAULT_ACCOUNT_ID ? `${FILE_JOURNAL_PREFIX}.json` : `${FILE_JOURNAL_PREFIX}_${acctId}.json`
-  const json = JSON.stringify(entries)
-  localStorage.setItem(key, json)
-  if (isTauri) {
-    await fsWriteText(filename, json)
-  }
-}
-
-/** Load journal entries: in Tauri mode tries AppData file first. */
-async function loadJournalEntriesAsync(acctId: string): Promise<Record<string, JournalEntry>> {
-  const key = acctId === DEFAULT_ACCOUNT_ID ? JOURNAL_KEY : `${JOURNAL_KEY}_${acctId}`
-  const filename = acctId === DEFAULT_ACCOUNT_ID ? `${FILE_JOURNAL_PREFIX}.json` : `${FILE_JOURNAL_PREFIX}_${acctId}.json`
-  if (isTauri) {
-    const raw = await fsReadText(filename)
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw)
-        localStorage.setItem(key, raw)
-        return parsed
-      } catch { /* fall through */ }
-    }
-  }
-  try { return JSON.parse(localStorage.getItem(key) || '{}') } catch { return {} }
 }
 
 /** One-time migration: on first Tauri launch, copy any existing localStorage data to AppData files. */
@@ -201,7 +166,7 @@ export function loadSettings(): AppSettings {
     if (!raw) return { ...DEFAULT_SETTINGS, accounts: [{ ...DEFAULT_ACCOUNT }] }
     const parsed = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
     // Migrate legacy theme values
-    if (parsed.theme === 'dark' || parsed.theme === 'light') {
+  if ((parsed.theme as string) === 'dark' || (parsed.theme as string) === 'light') {
       parsed.theme = 'obsidian'
     }
     // Migrate: ensure accounts array exists

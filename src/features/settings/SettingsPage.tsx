@@ -44,6 +44,16 @@ export function SettingsPage() {
   const [editDesc, setEditDesc] = useState('')
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
+  // Current app version (read from Tauri at mount)
+  const [currentVersion, setCurrentVersion] = useState('0.1.1')
+  useEffect(() => {
+    if (isTauri) {
+      import('@tauri-apps/api/app').then(({ getVersion }) => {
+        getVersion().then(v => setCurrentVersion(v)).catch(() => {})
+      }).catch(() => {})
+    }
+  }, [])
+
   // Update checker state
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloading' | 'upToDate' | 'error'>('idle')
   const [updateVersion, setUpdateVersion] = useState('')
@@ -738,7 +748,7 @@ export function SettingsPage() {
           <div className="updater-info">
             <div className="updater-current">
               <span className="updater-label">Current Version</span>
-              <span className="updater-version">v0.1.0</span>
+              <span className="updater-version">v{currentVersion}</span>
             </div>
 
             {updateStatus === 'idle' && (
