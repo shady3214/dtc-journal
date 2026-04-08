@@ -375,18 +375,50 @@ export function DashboardPage() {
                   ${t.pnl.toFixed(2)}
                 </span>
               </div>
-              {t.chartImageData && (
-                <div className="trade-chart-wrapper">
-                  <img src={t.chartImageData} className="trade-row-chart" alt={`${t.pair} chart`} />
-                  <button
-                    className="chart-popout-btn"
-                    title="View full chart"
-                    onClick={() => setLightboxImg({ src: t.chartImageData!, alt: `${t.pair} chart` })}
-                  >
-                    &#x26F6;
-                  </button>
-                </div>
-              )}
+              {(t.chartImageData || t.chartLink) && (() => {
+                // Derive a displayable image src:
+                // 1. Uploaded base64 image takes priority
+                // 2. TradingView snapshot link: append .png to get embeddable image
+                //    e.g. https://www.tradingview.com/x/ryNyvGUs/ → .../x/ryNyvGUs/.png
+                // 3. Any other link: show a link-only fallback (no img)
+                const imgSrc = t.chartImageData
+                  ? t.chartImageData
+                  : t.chartLink && /tradingview\.com\/x\//i.test(t.chartLink)
+                    ? t.chartLink.replace(/\/?$/, '') + '.png'
+                    : null
+
+                return (
+                  <div className="trade-chart-wrapper">
+                    {imgSrc ? (
+                      <>
+                        <img src={imgSrc} className="trade-row-chart" alt={`${t.pair} chart`} />
+                        <button
+                          className="chart-popout-btn"
+                          title="View full chart"
+                          onClick={() => {
+                            if (t.chartImageData) {
+                              setLightboxImg({ src: t.chartImageData, alt: `${t.pair} chart` })
+                            } else if (t.chartLink) {
+                              window.open(t.chartLink, '_blank', 'noopener,noreferrer')
+                            }
+                          }}
+                        >
+                          &#x26F6;
+                        </button>
+                      </>
+                    ) : (
+                      <a
+                        href={t.chartLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="chart-link-card"
+                      >
+                        View Chart →
+                      </a>
+                    )}
+                  </div>
+                )
+              })()}
               {t.notesHtml && (
                 <p className="trade-row-notes">{t.notesHtml}</p>
               )}

@@ -1899,6 +1899,26 @@ input[type="file"]::file-selector-button {
   color: var(--accent);
 }
 
+/* Chart link fallback in trade card (non-TradingView URLs) */
+.chart-link-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  border: 1px dashed var(--border-hi);
+  border-radius: 8px;
+  margin-top: 8px;
+  transition: background 0.15s ease;
+}
+
+.chart-link-card:hover {
+  background: var(--accent-glow);
+}
+
 /* ── Lightbox (Full-screen Chart View) ─────────────────────── */
 
 .lightbox-overlay {
