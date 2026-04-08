@@ -57,15 +57,42 @@ function isDst(date: Date): boolean {
 // ── Notification permission ────────────────────────────────────────
 
 export async function requestNotificationPermission(): Promise<NotificationPermission> {
+  if (isTauri) {
+    try {
+      const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification')
+      let granted = await isPermissionGranted()
+      if (!granted) {
+        const permission = await requestPermission()
+        granted = permission === 'granted'
+      }
+      return granted ? 'granted' : 'denied'
+    } catch {
+      return 'denied'
+    }
+  }
   if (!('Notification' in window)) return 'denied'
   if (Notification.permission === 'granted') return 'granted'
   if (Notification.permission === 'denied') return 'denied'
   return Notification.requestPermission()
 }
 
-export function sendTestNotification() {
+export async function sendTestNotification() {
+  if (isTauri) {
+    try {
+      const { isPermissionGranted, sendNotification: tauriSend } = await import('@tauri-apps/plugin-notification')
+      const granted = await isPermissionGranted()
+      if (!granted) {
+        alert('Notifications are not enabled. Toggle "Enable Notifications" first to grant permission.')
+        return
+      }
+      tauriSend({ title: 'DTC Journal — Test Notification', body: 'Notifications are working! You will receive alerts for high-impact news and market opens.' })
+    } catch (e) {
+      alert(`Notification failed: ${e}`)
+    }
+    return
+  }
   if (!('Notification' in window)) {
-    alert('Notifications are not supported in this browser/environment.')
+    alert('Notifications are not supported in this environment.')
     return
   }
   if (Notification.permission !== 'granted') {
@@ -85,19 +112,26 @@ export function sendTestNotification() {
 }
 
 
-function sendNotification(title: string, body: string, icon?: string) {
+function sendNotification(title: string, body: string, _icon?: string) {
+  if (isTauri) {
+    import('@tauri-apps/plugin-notification').then(({ isPermissionGranted, sendNotification: tauriSend }) => {
+      isPermissionGranted().then(granted => {
+        if (granted) tauriSend({ title, body })
+      })
+    }).catch(() => {})
+    return
+  }
   if (!('Notification' in window) || Notification.permission !== 'granted') return
   try {
     const n = new Notification(title, {
       body,
-      icon: icon || '/favicon.ico',
-      tag: title, // prevent duplicate stacking
+      icon: _icon || '/favicon.ico',
+      tag: title,
       requireInteraction: false,
     })
-    // Auto-close after 10s
     setTimeout(() => n.close(), 10_000)
   } catch {
-    // Some browsers block notifications from file:// URLs in dev — ignore
+    // ignore
   }
 }
 
