@@ -203,20 +203,27 @@ function buildTickerCandidates(symbol: string, meta?: SymbolResult): string[] {
 
   // 3. Fallback guesses if no type info or nothing matched yet
   if (candidates.length === 0) {
-    // 6 uppercase letters = likely a forex pair
-    if (sym.length === 6 && /^[A-Z]+$/.test(sym)) {
-      if (COMMODITY_MAP[sym]) {
-        candidates.push(COMMODITY_MAP[sym])
+    const isCryptoLike = /^(BTC|ETH|SOL|BNB|XRP|ADA|DOGE|LTC|DOT|AVAX|MATIC|LINK|UNI|ATOM|NEAR|FTM|ALGO|VET|ICP|FIL|SAND|MANA|AXS|SHIB|PEPE|WIF|OP|ARB|SUI|APT|INJ|SEI|TIA|PYTH)/i.test(sym)
+    if (isCryptoLike) {
+      // Try Yahoo crypto format: BTC-USD, ETH-USD, etc.
+      const m = sym.match(/^(.+?)(USD|USDT|EUR|GBP|BTC|ETH)$/i)
+      if (m) {
+        candidates.push(`${m[1]}-${m[2]}`)
+      } else {
+        candidates.push(`${sym}-USD`)
       }
+    } else if (sym.length === 6 && /^[A-Z]+$/.test(sym)) {
+      // 6 uppercase letters with no known crypto prefix = likely a forex pair
       candidates.push(`${sym}=X`)
     } else {
-      // Probably a stock ticker
       candidates.push(sym)
     }
   }
 
-  // 4. Always add forex fallback as last resort for 6-char symbols
-  if (sym.length === 6 && /^[A-Z]+$/.test(sym) && !candidates.includes(`${sym}=X`)) {
+  // 4. For confirmed forex/unknown 6-char symbols add =X as last-resort fallback
+  // but NOT for crypto symbols (BTC-USD ≠ BTCUSD=X)
+  const isCryptoCandidate = candidates.some((c) => c.includes('-') && !c.includes('='))
+  if (!isCryptoCandidate && sym.length === 6 && /^[A-Z]+$/.test(sym) && !candidates.includes(`${sym}=X`)) {
     candidates.push(`${sym}=X`)
   }
 

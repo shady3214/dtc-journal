@@ -212,10 +212,11 @@ export function NewsCalendarPage() {
   for (let d = 1; d <= daysInMonth; d++) cells.push(d)
   while (cells.length % 7 !== 0) cells.push(null)
 
-  // Events grouped by date string "YYYY-MM-DD"
+  // Events grouped by date string "YYYY-MM-DD" — Low impact filtered out
   const eventsByDay = useMemo(() => {
     const map = new Map<string, FfEvent[]>()
     for (const ev of eventsQuery.data ?? []) {
+      if (ev.impact === 'Low') continue
       const d = ev.date.slice(0, 10)
       const list = map.get(d) || []
       list.push(ev)
@@ -303,10 +304,9 @@ export function NewsCalendarPage() {
             const pnlData = pnlByDay.get(dateStr)
             const isToday = dateStr === todayStr
 
-            // Count by impact for badges
+            // Count by impact for badges (Low impact excluded)
             const highCount    = events.filter((e) => e.impact === 'High').length
             const medCount     = events.filter((e) => e.impact === 'Medium').length
-            const lowCount     = events.filter((e) => e.impact === 'Low').length
             const holidayCount = events.filter((e) => e.impact === 'Holiday').length
 
             // Cell border color driven by highest impact present
@@ -314,7 +314,6 @@ export function NewsCalendarPage() {
             if (tab === 'events') {
               if (highCount > 0) borderClass = 'ec-cell-high'
               else if (medCount > 0) borderClass = 'ec-cell-medium'
-              else if (lowCount > 0) borderClass = 'ec-cell-low'
             } else if (tab === 'pnl' && pnlData) {
               borderClass = pnlData.pnl >= 0 ? 'ec-cell-profit' : 'ec-cell-loss'
             }
@@ -353,11 +352,6 @@ export function NewsCalendarPage() {
                           {medCount}
                         </span>
                       )}
-                      {lowCount > 0 && (
-                        <span className="ec-dot-badge" style={{ background: IMPACT_COLOR.Low }}>
-                          {lowCount}
-                        </span>
-                      )}
                       {holidayCount > 0 && (
                         <span className="ec-dot-badge" style={{ background: IMPACT_COLOR.Holiday }}>
                           {holidayCount}
@@ -385,7 +379,7 @@ export function NewsCalendarPage() {
                     <span className={`ec-pnl-value ${pnlData.pnl >= 0 ? 'positive' : 'negative'}`}>
                       {pnlData.pnl >= 0 ? '+' : ''}${pnlData.pnl.toFixed(2)}
                     </span>
-                    <span className="ec-pnl-trades">{pnlData.trades}t</span>
+                    <span className="ec-pnl-trades">{pnlData.trades} {pnlData.trades !== 1 ? 'trades' : 'trade'}</span>
                   </div>
                 )}
               </div>
@@ -404,10 +398,6 @@ export function NewsCalendarPage() {
               <span className="ec-legend-item">
                 <span className="ec-legend-dot" style={{ background: IMPACT_COLOR.Medium }} />
                 Medium Impact
-              </span>
-              <span className="ec-legend-item">
-                <span className="ec-legend-dot" style={{ background: IMPACT_COLOR.Low }} />
-                Low Impact
               </span>
               <span className="ec-legend-item">
                 <span className="ec-legend-dot" style={{ background: IMPACT_COLOR.Holiday }} />

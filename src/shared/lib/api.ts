@@ -19,6 +19,138 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
   throw new Error('Tauri runtime not available')
 }
 
+// ── File-based persistence (Tauri only, AppData folder) ─────
+// Data is stored in %APPDATA%\com.dtc.journal\ as JSON files.
+// This survives app reinstalls because Windows does not remove AppData on uninstall.
+// localStorage is kept in sync as a fast synchronous read cache.
+//
+// The plugin specifier is kept in a variable so Vite's static import analysis
+// does NOT try to resolve/bundle it in browser/dev mode (it's Tauri-only).
+
+const FILE_SETTINGS = 'journal_settings.json'
+const FILE_JOURNAL_PREFIX = 'journal_entries'
+const _fsPlugin = '@tauri-apps/plugin-fs' // opaque to Vite static analysis
+
+async function fsWriteText(filename: string, text: string): Promise<void> {
+  if (!isTauri) return
+  try {
+    const { BaseDirectory, mkdir, writeTextFile } = await import(/* @vite-ignore */ _fsPlugin)
+    try { await mkdir('', { baseDir: BaseDirectory.AppData, recursive: true }) } catch { /* already exists */ }
+    await writeTextFile(filename, text, { baseDir: BaseDirectory.AppData })
+  } catch (e) {
+    console.warn('[fs] write failed:', e)
+  }
+}
+
+async function fsReadText(filename: string): Promise<string | null> {
+  if (!isTauri) return null
+  try {
+    const { BaseDirectory, readTextFile } = await import(/* @vite-ignore */ _fsPlugin)
+    return await readTextFile(filename, { baseDir: BaseDirectory.AppData })
+  } catch {
+    return null
+  }
+}
+
+async function fsRemove(filename: string): Promise<void> {
+  if (!isTauri) return
+  try {
+    const { BaseDirectory, remove } = await import(/* @vite-ignore */ _fsPlugin)
+    await remove(filename, { baseDir: BaseDirectory.AppData })
+  } catch { /* file may not exist */ }
+}
+
+/** Write settings to both localStorage and AppData file (Tauri only). */
+export async function persistSettingsAsync(settings: AppSettings): Promise<void> {
+  const json = JSON.stringify(settings)
+  localStorage.setItem(SETTINGS_KEY, json)
+  if (isTauri) {
+    await fsWriteText(FILE_SETTINGS, json)
+  }
+}
+
+/** Load settings: in Tauri mode tries AppData file first, then falls back to localStorage. */
+export async function loadSettingsAsync(): Promise<AppSettings> {
+  if (isTauri) {
+    const raw = await fsReadText(FILE_SETTINGS)
+    if (raw) {
+      try {
+        const parsed = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+        // Also sync back to localStorage so synchronous loadSettings() stays current
+        localStorage.setItem(SETTINGS_KEY, raw)
+        return applySettingsMigrations(parsed)
+      } catch { /* fall through to localStorage */ }
+    }
+  }
+  return loadSettings()
+}
+
+function applySettingsMigrations(parsed: AppSettings): AppSettings {
+  if (parsed.theme === 'dark' || parsed.theme === 'light') {
+    parsed.theme = 'obsidian'
+  }
+  if (!parsed.accounts || !Array.isArray(parsed.accounts) || parsed.accounts.length === 0) {
+    parsed.accounts = [{ ...DEFAULT_ACCOUNT, capital: parsed.startingCapital || parsed.defaultCapital || 1000 }]
+    parsed.activeAccountId = DEFAULT_ACCOUNT_ID
+  }
+  if (!parsed.activeAccountId) {
+    parsed.activeAccountId = parsed.accounts[0]?.id || DEFAULT_ACCOUNT_ID
+  }
+  return parsed
+}
+
+/** Write journal entries to both localStorage and AppData file (Tauri only). */
+async function persistJournalEntriesAsync(entries: Record<string, JournalEntry>, acctId: string): Promise<void> {
+  const key = acctId === DEFAULT_ACCOUNT_ID ? JOURNAL_KEY : `${JOURNAL_KEY}_${acctId}`
+  const filename = acctId === DEFAULT_ACCOUNT_ID ? `${FILE_JOURNAL_PREFIX}.json` : `${FILE_JOURNAL_PREFIX}_${acctId}.json`
+  const json = JSON.stringify(entries)
+  localStorage.setItem(key, json)
+  if (isTauri) {
+    await fsWriteText(filename, json)
+  }
+}
+
+/** Load journal entries: in Tauri mode tries AppData file first. */
+async function loadJournalEntriesAsync(acctId: string): Promise<Record<string, JournalEntry>> {
+  const key = acctId === DEFAULT_ACCOUNT_ID ? JOURNAL_KEY : `${JOURNAL_KEY}_${acctId}`
+  const filename = acctId === DEFAULT_ACCOUNT_ID ? `${FILE_JOURNAL_PREFIX}.json` : `${FILE_JOURNAL_PREFIX}_${acctId}.json`
+  if (isTauri) {
+    const raw = await fsReadText(filename)
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw)
+        localStorage.setItem(key, raw)
+        return parsed
+      } catch { /* fall through */ }
+    }
+  }
+  try { return JSON.parse(localStorage.getItem(key) || '{}') } catch { return {} }
+}
+
+/** One-time migration: on first Tauri launch, copy any existing localStorage data to AppData files. */
+export async function migrateLocalStorageToFiles(): Promise<void> {
+  if (!isTauri) return
+  // Only migrate if the settings file doesn't exist yet
+  const existing = await fsReadText(FILE_SETTINGS)
+  if (existing) return // already migrated
+
+  const settingsRaw = localStorage.getItem(SETTINGS_KEY)
+  if (settingsRaw) {
+    await fsWriteText(FILE_SETTINGS, settingsRaw)
+  }
+
+  // Migrate journal entries for all accounts
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i)
+    if (k && k.startsWith('journal_entries')) {
+      const acctSuffix = k === JOURNAL_KEY ? '' : k.slice(JOURNAL_KEY.length)
+      const filename = `${FILE_JOURNAL_PREFIX}${acctSuffix}.json`
+      const raw = localStorage.getItem(k)
+      if (raw) await fsWriteText(filename, raw)
+    }
+  }
+}
+
 // ── localStorage fallback for browser dev ───────────────────
 
 const STORAGE_KEY = 'journal_trades'
@@ -43,6 +175,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultRiskPercent: 1,
   defaultCommissionPerLot: 0,
   defaultSession: '',
+  defaultDirectPnl: false,
   aiProvider: 'groq',
   groqApiKey: '',
   groqModel: 'meta-llama/llama-4-scout-17b-16e-instruct',
@@ -87,6 +220,10 @@ export function loadSettings(): AppSettings {
 
 export function persistSettings(settings: AppSettings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+  // Also write to AppData file for persistence across reinstalls (fire-and-forget)
+  if (isTauri) {
+    fsWriteText(FILE_SETTINGS, JSON.stringify(settings)).catch(() => {})
+  }
 }
 
 /** Get the active account ID from settings */
@@ -131,6 +268,12 @@ function loadJournalEntries(): Record<string, JournalEntry> {
 
 function persistJournalEntries(entries: Record<string, JournalEntry>) {
   localStorage.setItem(acctKey(JOURNAL_KEY), JSON.stringify(entries))
+  // Also write to AppData file for persistence across reinstalls (fire-and-forget)
+  if (isTauri) {
+    const acctId = getActiveAccountId()
+    const filename = acctId === DEFAULT_ACCOUNT_ID ? `${FILE_JOURNAL_PREFIX}.json` : `${FILE_JOURNAL_PREFIX}_${acctId}.json`
+    fsWriteText(filename, JSON.stringify(entries)).catch(() => {})
+  }
 }
 
 // ── AI Provider Helpers ─────────────────────────────────────

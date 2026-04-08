@@ -4,7 +4,7 @@
  * Polls every 30 seconds to check for:
  *  1. Upcoming high-impact forex news events (ForexFactory calendar)
  *  2. New York market open (9:30 AM ET)
- *  3. London market open (8:00 AM GMT)
+ *  3. London market open (8:00 AM GMT / 12:30 PM IST)
  *
  * Uses the Web Notifications API which works in both Tauri and browser.
  */
@@ -34,11 +34,11 @@ export interface FfEvent {
  * EST = UTC-5, EDT (Mar–Nov) = UTC-4
  */
 function getNyOpenUtcHour(): number {
-  // During EDT (summer DST) NY 9:30 = 13:30 UTC
-  // During EST (winter)     NY 9:30 = 14:30 UTC
+  // EDT (Mar–Nov): NY 9:30 = 13:30 UTC
+  // EST (Nov–Mar): NY 9:30 = 14:30 UTC
   const now = new Date()
-  const estOffset = isDst(now) ? 4 : 5 // hours behind UTC
-  return 9 + estOffset  // 9 AM ET in UTC hours
+  const estOffset = isUsEasternDst(now) ? 4 : 5
+  return 9 + estOffset
 }
 
 function getNyOpenUtcMinute(): number {
@@ -46,12 +46,27 @@ function getNyOpenUtcMinute(): number {
 }
 
 /**
- * Rough DST check for US Eastern (second Sun Mar → first Sun Nov).
+ * Check if US Eastern is currently on EDT (UTC-4) vs EST (UTC-5).
+ * Works correctly regardless of the user's local timezone.
+ * EDT: second Sunday in March → first Sunday in November
  */
-function isDst(date: Date): boolean {
-  const jan = new Date(date.getFullYear(), 0, 1).getTimezoneOffset()
-  const jul = new Date(date.getFullYear(), 6, 1).getTimezoneOffset()
-  return date.getTimezoneOffset() < Math.max(jan, jul)
+function isUsEasternDst(date: Date): boolean {
+  const year = date.getUTCFullYear()
+
+  // Second Sunday in March at 2:00 AM ET = 7:00 AM UTC
+  const march = new Date(Date.UTC(year, 2, 1))
+  const marchDay = march.getUTCDay() // 0=Sun
+  const secondSundayMarch = 8 + (7 - marchDay) % 7 // day of month
+  const dstStart = Date.UTC(year, 2, secondSundayMarch, 7, 0, 0)
+
+  // First Sunday in November at 2:00 AM ET = 6:00 AM UTC (already EDT→EST)
+  const nov = new Date(Date.UTC(year, 10, 1))
+  const novDay = nov.getUTCDay()
+  const firstSundayNov = 1 + (7 - novDay) % 7
+  const dstEnd = Date.UTC(year, 10, firstSundayNov, 6, 0, 0)
+
+  const t = date.getTime()
+  return t >= dstStart && t < dstEnd
 }
 
 // ── Notification permission ────────────────────────────────────────
@@ -223,7 +238,7 @@ class NotificationScheduler {
   }
 
   private checkSessionOpen(now: Date, settings: ReturnType<typeof loadSettings>) {
-    const todayStr = now.toISOString().slice(0, 10)
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
     const nyMinsBefore = settings.notifyNyOpenMinutesBefore ?? 15
     const londonMinsBefore = nyMinsBefore // reuse same lead time for London
 
@@ -263,7 +278,7 @@ class NotificationScheduler {
         const mins = Math.round(londonMinUntil)
         sendNotification(
           '🇬🇧 London Market Opens Soon',
-          `London session opens in ${mins} minute${mins !== 1 ? 's' : ''}. High liquidity period beginning.`,
+          `London session opens in ${mins} minute${mins !== 1 ? 's' : ''} (8:00 AM GMT / 12:30 PM IST). High liquidity period beginning.`,
         )
       }
     }

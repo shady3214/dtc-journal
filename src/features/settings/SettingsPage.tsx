@@ -108,7 +108,11 @@ export function SettingsPage() {
 
   // Persist on save
   const save = useCallback(async () => {
-    await getApi().saveSettings(form)
+    // Merge the latest accounts from AccountContext into form before saving,
+    // so that inline account edits are not overwritten by the stale form state.
+    const latest = loadSettings()
+    const merged = { ...form, accounts: latest.accounts, activeAccountId: latest.activeAccountId }
+    await getApi().saveSettings(merged)
     // Sync starting capital to the legacy key used by EquityCurve
     localStorage.setItem('journal_starting_capital', form.startingCapital.toString())
     // Sync theme
@@ -274,7 +278,7 @@ export function SettingsPage() {
       {/* ── Account ──────────────────────────────────────────── */}
       <section className="card settings-section">
         <h3 className="settings-section-title">Account</h3>
-        <div className="settings-grid">
+        <div className="settings-grid" style={{ gridTemplateColumns: '1fr' }}>
           <div className="settings-field">
             <label className="label">Display Name</label>
             <input
@@ -284,17 +288,6 @@ export function SettingsPage() {
               onChange={(e) => set('displayName', e.target.value)}
             />
             <span className="settings-hint">Optional. Shown in the sidebar greeting.</span>
-          </div>
-          <div className="settings-field">
-            <label className="label">Starting Capital ($)</label>
-            <input
-              type="number"
-              min={0}
-              step={100}
-              value={form.startingCapital || ''}
-              onChange={(e) => set('startingCapital', parseFloat(e.target.value) || 0)}
-            />
-            <span className="settings-hint">Used for the equity curve baseline on the dashboard.</span>
           </div>
         </div>
       </section>
@@ -520,6 +513,24 @@ export function SettingsPage() {
               <option value="London">London</option>
               <option value="New York">New York</option>
             </select>
+          </div>
+          <div className="settings-field" style={{ gridColumn: '1 / -1' }}>
+            <label className="label">Direct P&amp;L Input</label>
+            <div className="toggle-row" style={{ marginTop: 6 }}>
+              <button
+                type="button"
+                className={`toggle-btn ${form.defaultDirectPnl ? 'toggle-on' : ''}`}
+                onClick={() => set('defaultDirectPnl', !form.defaultDirectPnl)}
+              >
+                <span className="toggle-thumb" />
+              </button>
+              <span className="muted" style={{ fontSize: '0.82rem' }}>
+                {form.defaultDirectPnl
+                  ? 'Enter P&L directly — Entry/SL/TP hidden by default'
+                  : 'Calculate from Entry / SL / TP (default)'}
+              </span>
+            </div>
+            <span className="settings-hint">When on, new trades open with direct P&L mode pre-enabled. You can still toggle it per trade.</span>
           </div>
         </div>
       </section>

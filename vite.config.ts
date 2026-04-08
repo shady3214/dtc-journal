@@ -26,10 +26,27 @@ export default defineConfig({
       '/api/ff-calendar': {
         target: 'https://nfs.faireconomy.media',
         changeOrigin: true,
+        secure: false,
         rewrite: () => '/ff_calendar_thisweek.json',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'en-US,en;q=0.9',
           'Referer': 'https://www.forexfactory.com/',
+          'Origin': 'https://www.forexfactory.com',
+        },
+      },
+      '/api/ff-calendar-next': {
+        target: 'https://nfs.faireconomy.media',
+        changeOrigin: true,
+        secure: false,
+        rewrite: () => '/ff_calendar_nextweek.json',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://www.forexfactory.com/',
+          'Origin': 'https://www.forexfactory.com',
         },
       },
     },

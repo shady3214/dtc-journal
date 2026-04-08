@@ -9,6 +9,12 @@
     "core:default",
     "updater:default",
     "process:default",
-    "notification:default"
+    "notification:default",
+    "fs:default",
+    "fs:allow-app-read",
+    "fs:allow-app-write",
+    "fs:allow-appdata-read",
+    "fs:allow-appdata-write",
+    "fs:allow-mkdir"
   ]
 }

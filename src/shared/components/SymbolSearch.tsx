@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
 
 const FAV_KEY = 'journal-fav-pairs'
+const FAV_META_KEY = 'journal-fav-pairs-meta'
 
 function loadFavs(): string[] {
   try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]') } catch { return [] }
@@ -10,6 +11,15 @@ function loadFavs(): string[] {
 
 function saveFavs(favs: string[]) {
   localStorage.setItem(FAV_KEY, JSON.stringify(favs))
+}
+
+// Store minimal result metadata per sym so we can trigger price fetch from favourites
+function loadFavMeta(): Record<string, { type: string; exchange: string }> {
+  try { return JSON.parse(localStorage.getItem(FAV_META_KEY) || '{}') } catch { return {} }
+}
+
+function saveFavMeta(meta: Record<string, { type: string; exchange: string }>) {
+  localStorage.setItem(FAV_META_KEY, JSON.stringify(meta))
 }
 
 /** Strip HTML tags like <em>...</em> from TradingView search results */
@@ -32,6 +42,11 @@ interface Props {
 
 const TYPE_FILTERS = ['All', 'Forex', 'Crypto', 'Index', 'Futures'] as const
 
+// Only show results from these exchanges (case-insensitive match)
+const ALLOWED_EXCHANGES = new Set([
+  'OANDA', 'FXCM', 'FOREXCOM', 'CME', 'NASDAQ', 'COMEX', 'BINANCE',
+])
+
 export function SymbolSearch({ value, onChange, placeholder }: Props) {
   const [query, setQuery] = useState(value)
   const [results, setResults] = useState<SymbolResult[]>([])
@@ -40,6 +55,7 @@ export function SymbolSearch({ value, onChange, placeholder }: Props) {
   const [activeFilter, setActiveFilter] = useState<string>('All')
   const [highlightIdx, setHighlightIdx] = useState(-1)
   const [favs, setFavs] = useState<string[]>(loadFavs)
+  const [favMeta, setFavMeta] = useState<Record<string, { type: string; exchange: string }>>(loadFavMeta)
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -60,13 +76,20 @@ export function SymbolSearch({ value, onChange, placeholder }: Props) {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const toggleFav = (sym: string, e: React.MouseEvent) => {
+  const toggleFav = (sym: string, e: React.MouseEvent, result?: SymbolResult) => {
     e.stopPropagation()
     setFavs((prev) => {
       const next = prev.includes(sym) ? prev.filter((f) => f !== sym) : [...prev, sym]
       saveFavs(next)
       return next
     })
+    if (result) {
+      setFavMeta((prev) => {
+        const next = { ...prev, [sym]: { type: result.type, exchange: result.exchange } }
+        saveFavMeta(next)
+        return next
+      })
+    }
   }
 
   const search = useCallback(async (text: string, typeFilter: string) => {
@@ -90,12 +113,12 @@ export function SymbolSearch({ value, onChange, placeholder }: Props) {
         data = await resp.json()
       }
 
-      const mapped: SymbolResult[] = (data as any[]).slice(0, 30).map((item: any) => ({
+      const mapped: SymbolResult[] = (data as any[]).slice(0, 100).map((item: any) => ({
         symbol: stripHtml(item.symbol || ''),
         description: stripHtml(item.description || ''),
         type: item.type || '',
-        exchange: item.exchange || '',
-      }))
+        exchange: stripHtml(item.exchange || ''),
+      })).filter((r) => ALLOWED_EXCHANGES.has(r.exchange.toUpperCase())).slice(0, 30)
       setResults(mapped)
       setHighlightIdx(-1)
     } catch {
@@ -187,32 +210,39 @@ export function SymbolSearch({ value, onChange, placeholder }: Props) {
             <div className="symbol-favs-section">
               <div className="symbol-favs-label">Favourites</div>
               <div className="symbol-favs-list">
-                {favs.map((sym) => (
-                  <button
-                    key={sym}
-                    className="symbol-fav-chip"
-                    onClick={() => handleSelect(sym)}
-                    type="button"
-                  >
-                    {sym}
-                    <span
-                      className="symbol-fav-remove"
-                      onClick={(e) => toggleFav(sym, e)}
-                      title="Remove from favourites"
-                    >
-                      ×
-                    </span>
-                  </button>
-                ))}
+                {favs.map((sym) => {
+                    const meta = favMeta[sym]
+                    const result: SymbolResult | undefined = meta
+                      ? { symbol: sym, description: '', type: meta.type, exchange: meta.exchange }
+                      : undefined
+                    return (
+                      <button
+                        key={sym}
+                        className="symbol-fav-chip"
+                        onClick={() => handleSelect(sym, result)}
+                        type="button"
+                      >
+                        {sym}
+                        <span
+                          className="symbol-fav-remove"
+                          onClick={(e) => toggleFav(sym, e)}
+                          title="Remove from favourites"
+                        >
+                          ×
+                        </span>
+                      </button>
+                    )
+                  })}
               </div>
             </div>
           )}
 
           {/* Column headers */}
           <div className="symbol-list-header">
+            <span></span>
             <span>Symbol</span>
             <span>Description</span>
-            <span style={{ textAlign: 'right' }}>Type</span>
+            <span>Exchange</span>
           </div>
 
           {/* Results */}
@@ -224,30 +254,35 @@ export function SymbolSearch({ value, onChange, placeholder }: Props) {
             {!loading && query.length < 1 && results.length === 0 && favs.length === 0 && (
               <div className="symbol-list-empty">Type to search symbols…</div>
             )}
-            {!loading && results.map((r, i) => (
-              <button
-                key={`${r.exchange}:${r.symbol}-${i}`}
-                className={`symbol-list-item ${i === highlightIdx ? 'highlighted' : ''}`}
-                onClick={() => handleSelect(r.symbol, r)}
-                onMouseEnter={() => setHighlightIdx(i)}
-                type="button"
-              >
-                <span className="symbol-list-sym">{r.symbol}</span>
-                <span className="symbol-list-desc">{r.description}</span>
-                <span className="symbol-list-meta">
-                  <span className="symbol-type-badge">{typeLabel(r.type)}</span>
-                  <span className="symbol-exchange">{r.exchange}</span>
-                  <button
-                    type="button"
-                    className={`symbol-fav-btn ${favs.includes(r.symbol.replace('/', '')) ? 'active' : ''}`}
-                    onClick={(e) => toggleFav(r.symbol.replace('/', ''), e)}
-                    title={favs.includes(r.symbol.replace('/', '')) ? 'Remove from favourites' : 'Add to favourites'}
+            {!loading && results.map((r, i) => {
+              const sym = r.symbol.replace('/', '')
+              const isFav = favs.includes(sym)
+              return (
+                <button
+                  key={`${r.exchange}:${r.symbol}-${i}`}
+                  className={`symbol-list-item ${i === highlightIdx ? 'highlighted' : ''}`}
+                  onClick={() => handleSelect(r.symbol, r)}
+                  onMouseEnter={() => setHighlightIdx(i)}
+                  type="button"
+                >
+                  <span
+                    className={`symbol-fav-btn ${isFav ? 'active' : ''}`}
+                    onClick={(e) => { e.stopPropagation(); toggleFav(sym, e, r) }}
+                    title={isFav ? 'Remove from favourites' : 'Add to favourites'}
+                    role="button"
+                    tabIndex={-1}
                   >
                     ♥
-                  </button>
-                </span>
-              </button>
-            ))}
+                  </span>
+                  <span className="symbol-list-sym">{r.symbol}</span>
+                  <span className="symbol-list-desc">{r.description}</span>
+                  <span className="symbol-list-right">
+                    <span className="symbol-type-badge">{typeLabel(r.type)}</span>
+                    <span className="symbol-exchange">{r.exchange}</span>
+                  </span>
+                </button>
+              )
+            })}
           </div>
         </div>
       )}

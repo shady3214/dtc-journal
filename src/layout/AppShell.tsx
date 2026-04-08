@@ -105,6 +105,7 @@ export function AppShell() {
   const { user, signOut, configured } = useAuth()
   const { accounts, activeAccount, switchAccount } = useAccount()
   const [acctDropdownOpen, setAcctDropdownOpen] = useState(false)
+  const [displayName, setDisplayName] = useState<string>(() => loadSettings().displayName || '')
   const [theme, setTheme] = useState<ThemeName>(() => {
     const s = loadSettings()
     return s.theme || 'obsidian'
@@ -118,6 +119,11 @@ export function AppShell() {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('journal-theme', theme)
   }, [theme])
+
+  // Refresh display name when navigating (picks up settings changes)
+  useEffect(() => {
+    setDisplayName(loadSettings().displayName || '')
+  }, [location.pathname])
 
   // Persist sidebar state
   useEffect(() => {
@@ -194,6 +200,9 @@ export function AppShell() {
             </button>
           </div>
           {sidebarOpen && <p className="sidebar-tagline">Trading Performance Tracker</p>}
+          {sidebarOpen && displayName && (
+            <p className="sidebar-greeting">Hey, {displayName} 👋</p>
+          )}
         </div>
 
         {/* Account Switcher */}

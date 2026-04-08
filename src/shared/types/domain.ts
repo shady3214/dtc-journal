@@ -103,6 +103,7 @@ export interface AppSettings {
   defaultRiskPercent: number
   defaultCommissionPerLot: number
   defaultSession: string
+  defaultDirectPnl: boolean
 
   // AI Configuration
   aiProvider: 'groq' | 'gemini' | 'ollama'

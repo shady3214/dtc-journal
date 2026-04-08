@@ -95,7 +95,7 @@ export function TradesPage() {
   const [tagInput, setTagInput] = useState('')
   const [fetchingPrice, setFetchingPrice] = useState(false)
   const [symbolType, setSymbolType] = useState('')
-  const [directPnl, setDirectPnl] = useState(false)
+  const [directPnl, setDirectPnl] = useState(() => loadSettings().defaultDirectPnl ?? false)
   const [directPnlValue, setDirectPnlValue] = useState('')
   const isEditing = !!form.id
 
@@ -228,7 +228,7 @@ export function TradesPage() {
     setAi(null)
     setAiError('')
     setTagInput('')
-    setDirectPnl(false)
+    setDirectPnl(loadSettings().defaultDirectPnl ?? false)
     setDirectPnlValue('')
   }
 
@@ -320,10 +320,15 @@ export function TradesPage() {
             onChange={(symbol, result) => {
               setForm((prev) => ({ ...prev, pair: symbol }))
               setSymbolType(result?.type || '')
-              // Auto-fetch live price when a symbol is selected from dropdown
-              if (result) {
+              // Auto-fetch live price when a symbol is selected — skip in direct P&L mode
+              if (!directPnl) {
                 setFetchingPrice(true)
-                fetchLivePrice(symbol, result)
+                // Use result meta if available; otherwise guess type from symbol pattern
+                const sym = symbol.replace('/', '').toUpperCase()
+                const isCryptoSymbol = /^(BTC|ETH|SOL|BNB|XRP|ADA|DOGE|LTC|DOT|AVAX|MATIC|LINK|UNI|ATOM|NEAR|FTM|ALGO|VET|ICP|FIL|SAND|MANA|AXS|SHIB|PEPE|WIF|OP|ARB|SUI|APT|INJ|SEI|TIA|PYTH)/i.test(sym)
+                const guessedType = isCryptoSymbol ? 'crypto' : 'forex'
+                const meta = result ?? { symbol, description: '', type: guessedType, exchange: isCryptoSymbol ? 'BINANCE' : 'OANDA' }
+                fetchLivePrice(symbol, meta)
                   .then((price) => {
                     if (price !== null) {
                       setForm((prev) => ({ ...prev, entry: price }))
