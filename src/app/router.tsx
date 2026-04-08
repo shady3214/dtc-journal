@@ -5,6 +5,7 @@ import { TradesPage } from '../features/trades/TradesPage'
 import { AnalyticsPage } from '../features/analytics/AnalyticsPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
 import { JournalPage } from '../features/journal/JournalPage'
+import { NewsCalendarPage } from '../features/news-calendar/NewsCalendarPage'
 import { LoginPage } from '../features/auth/LoginPage'
 import { useAuth } from '../shared/contexts/AuthContext'
 
@@ -73,6 +74,7 @@ export const router = createBrowserRouter([
           { path: 'trades', element: <TradesPage /> },
           { path: 'analytics', element: <AnalyticsPage /> },
           { path: 'journal', element: <JournalPage /> },
+          { path: 'news-calendar', element: <NewsCalendarPage /> },
           { path: 'settings', element: <SettingsPage /> },
         ],
       },

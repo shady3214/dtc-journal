@@ -23,6 +23,15 @@ export default defineConfig({
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         },
       },
+      '/api/ff-calendar': {
+        target: 'https://nfs.faireconomy.media',
+        changeOrigin: true,
+        rewrite: () => '/ff_calendar_thisweek.json',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+          'Referer': 'https://www.forexfactory.com/',
+        },
+      },
     },
   },
 })

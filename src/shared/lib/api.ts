@@ -1,4 +1,4 @@
-import type { AiAnalysis, AnalyticsSummary, AppSettings, CalendarDayStat, JournalEntry, ThemeName, Trade, TradingAccount } from '../types/domain'
+import type { AiAnalysis, AnalyticsSummary, AppSettings, CalendarDayStat, JournalEntry, JournalAiFeedback, ThemeName, Trade, TradingAccount } from '../types/domain'
 import {
   dbListTrades, dbSaveTrade, dbDeleteTrade,
   dbGetJournalEntry, dbSaveJournalEntry, dbListJournalEntries,
@@ -51,6 +51,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ollamaUrl: 'http://127.0.0.1:11434',
   ollamaModel: 'llava-llama3',
   ollamaTimeoutSecs: 180,
+  // Notifications
+  notificationsEnabled: false,
+  notifyNewsEvents: true,
+  notifyCurrencies: ['USD', 'EUR', 'GBP', 'JPY', 'CAD'],
+  notifyMinutesBefore: 15,
+  notifyNyOpen: true,
+  notifyLondonOpen: false,
+  notifyNyOpenMinutesBefore: 15,
   theme: 'obsidian' as ThemeName,
 }
 
@@ -763,4 +771,155 @@ function buildAiPrompt(trade: Trade): string {
     `Respond with a JSON object using exactly these keys:`,
     `{"tradeIdeaSummary": "...", "mistakes": ["...", "..."], "setupClassification": "...", "riskManagementFeedback": "...", "recommendations": "...", "confidence": 0.7}`,
   ].join('\n')
+}
+
+// ── Journal AI Feedback ─────────────────────────────────────
+
+function buildJournalPrompt(entry: JournalEntry, trades: Trade[]): string {
+  const MOOD_LABELS = ['Terrible', 'Bad', 'Neutral', 'Good', 'Great']
+  const moodLabel = entry.postMood > 0 ? `${entry.postMood}/5 (${MOOD_LABELS[entry.postMood - 1]})` : 'not rated'
+
+  const totalPnl = trades.reduce((s, t) => s + t.pnl, 0)
+  const wins = trades.filter((t) => t.pnl > 0)
+  const losses = trades.filter((t) => t.pnl < 0)
+  const winRate = trades.length > 0 ? ((wins.length / trades.length) * 100).toFixed(0) : null
+  const avgRR = trades.length > 0
+    ? trades.map((t) => {
+        const risk = Math.abs(t.entry - t.stopLoss)
+        const reward = Math.abs(t.takeProfit - t.entry)
+        return risk > 0 ? reward / risk : 0
+      }).reduce((a, b) => a + b, 0) / trades.length
+    : null
+
+  const tradesBlock = trades.length === 0
+    ? 'No trades were logged for this day.'
+    : trades.map((t) => {
+        const risk = Math.abs(t.entry - t.stopLoss)
+        const reward = Math.abs(t.takeProfit - t.entry)
+        const rr = risk > 0 ? (reward / risk).toFixed(2) : 'N/A'
+        return `  - ${t.pair} ${t.direction} | PnL: $${t.pnl.toFixed(2)} | Risk: ${t.riskPercent}% | R:R ${rr} | Setup: ${t.setup || 'unspecified'} | Tags: ${t.tags.join(', ') || 'none'} | Notes: ${t.notesHtml || 'none'}`
+      }).join('\n')
+
+  const summaryBlock = trades.length > 0
+    ? `Day summary: ${trades.length} trade(s), $${totalPnl.toFixed(2)} PnL, ${wins.length}W/${losses.length}L${winRate ? `, ${winRate}% win rate` : ''}${avgRR !== null ? `, avg R:R ${avgRR.toFixed(2)}` : ''}.`
+    : ''
+
+  return `You are a direct, experienced trading mentor reviewing a trader's daily journal entry. Your job is NOT to be encouraging or generic. Your job is to find the truth in their day — where their thinking was clear, where it was deluded, and where their actions contradicted their words.
+
+You have two sources of truth: what the trader WROTE and what they actually DID (their trade data). Cross-reference them. If they said they followed their plan but their trades show otherwise, say so. If they rated their mood high but had a bad day, question it. If their written reflection is superficial, push deeper.
+
+CRITICAL LANGUAGE RULES — follow these exactly, no exceptions:
+1. When referencing something the trader wrote, quote their EXACT words verbatim in double-quotes. Do not paraphrase, rephrase, clean up, or summarise their language.
+2. Do not change their terminology. If they say "order block", say "order block". If they say "sniper entry", say "sniper entry".
+3. Write in second person ("you", "your"). Never say "the trader".
+4. Keep your own language plain and direct. No metaphors, no trading clichés ("stay disciplined", "trust the process"), no motivational phrasing.
+5. Every claim you make must be grounded in a specific number or a specific quoted phrase from the journal. No vague generalisations.
+
+=== JOURNAL ENTRY: ${entry.date} ===
+
+PRE-SESSION PLAN:
+- Market Bias: ${entry.preBias || 'not set'}
+- Session Focus: ${entry.preSession || 'not set'}
+- Key Levels/Zones: ${entry.preLevels || 'not written'}
+- Trading Plan: ${entry.prePlan || 'not written'}
+
+POST-SESSION REVIEW:
+- What went well: ${entry.postWentWell || 'not written'}
+- What went wrong: ${entry.postWentWrong || 'not written'}
+- Lessons learned: ${entry.postLessons || 'not written'}
+- Emotional state: ${moodLabel}
+- Grade given: ${entry.postGrade || 'not graded'}
+
+=== ACTUAL TRADE DATA FOR THIS DAY ===
+${summaryBlock}
+${tradesBlock}
+
+=== YOUR TASK ===
+
+Write your feedback as a JSON object with these exact keys:
+
+{
+  "mentor": "A direct 3-5 sentence paragraph. Write like a mentor who has seen everything — no fluff, no praise for ordinary things. Reference specific numbers and words from their journal. If something is off, name it exactly. If something was genuinely good, say what specifically made it good.",
+  "contradiction": "If there is a clear contradiction between what they wrote and what they did, describe it in one blunt sentence. Examples: they said they followed their plan but took 4 trades against their stated bias; they graded themselves A but had a losing day with poor R:R. If there is NO real contradiction, return null.",
+  "strength": "One specific thing they actually did well today, grounded in the numbers or their writing. Not generic. Must be earned. If nothing stands out, return null.",
+  "focusQuestion": "One hard question they should sit with tonight. Not rhetorical. Something that, if they answer it honestly, will make them a better trader. Make it specific to their actual day.",
+  "emotionalFlag": "If you detect emotional language in their writing (overconfidence, self-pity, blame, rationalization, rushed thinking), quote the exact phrase and explain in one sentence why it's a flag. If none, return null."
+}
+
+Be specific. Be honest. Do not soften the truth to protect feelings. A trader who gets honest feedback improves; one who gets validation stagnates.`
+}
+
+async function callGroqText(settings: AppSettings, prompt: string): Promise<string> {
+  const apiKey = settings.groqApiKey
+  if (!apiKey) throw new Error('Groq API key not set. Go to Settings > AI Configuration.')
+
+  const model = settings.groqModel || DEFAULT_SETTINGS.groqModel
+  let resp: Response
+  try {
+    resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.15,
+        max_tokens: 1024,
+        response_format: { type: 'json_object' },
+      }),
+    })
+  } catch {
+    throw new Error('Could not connect to Groq API. Check your internet connection.')
+  }
+
+  if (!resp.ok) {
+    let errMessage = ''
+    try { const e = await resp.json(); errMessage = e?.error?.message || '' } catch { /**/ }
+    if (resp.status === 401) throw new Error('Invalid Groq API key.')
+    if (resp.status === 429) throw new Error('Groq rate limit hit. Wait a moment and try again.')
+    throw new Error(`Groq error ${resp.status}: ${errMessage.slice(0, 200)}`)
+  }
+
+  const data = await resp.json()
+  return data?.choices?.[0]?.message?.content || ''
+}
+
+function parseJournalFeedback(raw: string, date: string): JournalAiFeedback {
+  let parsed: Record<string, unknown> = {}
+  try {
+    const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/)
+    parsed = JSON.parse(fence ? fence[1].trim() : raw)
+  } catch {
+    const m = raw.match(/\{[\s\S]*\}/)
+    try { if (m) parsed = JSON.parse(m[0]) } catch { /**/ }
+  }
+
+  return {
+    date,
+    mentor: String(parsed.mentor || raw.trim() || 'No response generated.'),
+    contradiction: parsed.contradiction && parsed.contradiction !== 'null' ? String(parsed.contradiction) : undefined,
+    strength: parsed.strength && parsed.strength !== 'null' ? String(parsed.strength) : undefined,
+    focusQuestion: String(parsed.focusQuestion || 'What would you do differently if you traded this day again?'),
+    emotionalFlag: parsed.emotionalFlag && parsed.emotionalFlag !== 'null' ? String(parsed.emotionalFlag) : undefined,
+    createdAt: new Date().toISOString(),
+  }
+}
+
+export async function analyzeJournalEntry(entry: JournalEntry): Promise<JournalAiFeedback> {
+  const settings = loadSettings()
+  if (!settings.groqApiKey) throw new Error('Groq API key not set. Add it in Settings > AI Configuration.')
+
+  // Load trades for this date to give the AI real context
+  const allTrades = (() => {
+    try { return JSON.parse(localStorage.getItem(acctKey(STORAGE_KEY)) || '[]') as Trade[] } catch { return [] }
+  })()
+  const dayTrades = allTrades.filter((t) => t.openedAt.startsWith(entry.date))
+
+  if (dayTrades.length === 0) throw new Error('NO_TRADES')
+
+  const prompt = buildJournalPrompt(entry, dayTrades)
+  const raw = await callGroqText(settings, prompt)
+  return parseJournalFeedback(raw, entry.date)
 }

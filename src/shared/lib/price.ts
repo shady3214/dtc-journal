@@ -23,21 +23,113 @@ const COMMODITY_MAP: Record<string, string> = {
 }
 
 /**
+ * Determine decimal precision for a symbol, matching TradingView display.
+ *  - JPY pairs      → 3 dp  (e.g. 154.321)
+ *  - Forex / crypto → 5 dp  (e.g. 1.16846)
+ *  - Gold (XAU)     → 3 dp  (e.g. 4,687.215)
+ *  - Silver (XAG)   → 4 dp  (e.g. 32.4150)
+ *  - Oil / gas      → 3 dp
+ *  - Stocks/indices → 2 dp
+ */
+export function getPricePrecision(symbol: string, type?: string): number {
+  const sym = symbol.replace('/', '').toUpperCase()
+  const t   = (type || '').toLowerCase()
+
+  if (sym.includes('JPY')) return 3
+
+  if (
+    sym.startsWith('XAU') || sym.startsWith('GC') ||  // Gold
+    sym === 'GC=F'
+  ) return 3
+
+  if (
+    sym.startsWith('XAG') || sym === 'SI=F' ||         // Silver
+    sym.startsWith('XPT') || sym === 'PL=F' ||         // Platinum
+    sym.startsWith('XPD') || sym === 'PA=F'            // Palladium
+  ) return 4
+
+  if (
+    sym.includes('OIL') || sym === 'CL=F' || sym === 'BZ=F' ||
+    sym === 'NG=F' || sym === 'HG=F' ||
+    sym.includes('USOIL') || sym.includes('UKOIL') || sym.includes('NGAS')
+  ) return 3
+
+  if (t.includes('crypto') || t === 'spot') {
+    // BTC/ETH typically 2dp, alts more — default 5 and let Yahoo decide
+    return 2
+  }
+
+  if (t.includes('stock') || t === 'dr' || t === 'common_stock' || t.includes('index')) return 2
+
+  // Default: forex 5 dp
+  return 5
+}
+
+/**
  * Fetch the live price for a symbol via Yahoo Finance (proxied through Vite).
- * Tries multiple ticker formats if the first attempt fails.
+ * Uses /v7/finance/quote which returns bid/ask for full pip precision.
+ * Falls back to /v8/finance/chart if quote endpoint fails.
  */
 export async function fetchLivePrice(symbol: string, meta?: SymbolResult): Promise<number | null> {
   const candidates = buildTickerCandidates(symbol, meta)
+  const precision  = getPricePrecision(symbol, meta?.type)
 
   for (const ticker of candidates) {
-    const price = await tryFetchPrice(ticker)
+    const price = await tryFetchQuote(ticker, precision)
+    if (price !== null) return price
+  }
+
+  // Fallback: chart endpoint
+  for (const ticker of candidates) {
+    const price = await tryFetchChart(ticker, precision)
     if (price !== null) return price
   }
 
   return null
 }
 
-async function tryFetchPrice(ticker: string): Promise<number | null> {
+/**
+ * Use Yahoo /v7/finance/quote — returns bid/ask with full precision.
+ */
+async function tryFetchQuote(ticker: string, precision: number): Promise<number | null> {
+  try {
+    const urlPath = `/v7/finance/quote?symbols=${encodeURIComponent(ticker)}&fields=bid,ask,regularMarketPrice`
+    let data: any
+
+    if (isTauri) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const text = await invoke<string>('proxy_yf_quote', { urlPath })
+      data = JSON.parse(text)
+    } else {
+      const resp = await fetch(`/api/yf-quote${urlPath}`)
+      if (!resp.ok) return null
+      data = await resp.json()
+    }
+
+    const result = data?.quoteResponse?.result?.[0]
+    if (!result) return null
+
+    // Prefer mid of bid/ask for tightest spread precision, fall back to market price
+    const bid = result.bid
+    const ask = result.ask
+    const mid = (typeof bid === 'number' && typeof ask === 'number' && bid > 0 && ask > 0)
+      ? (bid + ask) / 2
+      : null
+
+    const price = mid ?? result.regularMarketPrice
+    if (typeof price === 'number' && price > 0) {
+      return roundToPrecision(price, precision)
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Fallback: /v8/finance/chart endpoint.
+ */
+async function tryFetchChart(ticker: string, precision: number): Promise<number | null> {
   try {
     const urlPath = `/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`
     let data: any
@@ -54,12 +146,20 @@ async function tryFetchPrice(ticker: string): Promise<number | null> {
 
     const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice
     if (typeof price === 'number' && price > 0) {
-      return price
+      return roundToPrecision(price, precision)
     }
     return null
   } catch {
     return null
   }
+}
+
+/**
+ * Round to a given number of decimal places without floating-point drift.
+ */
+function roundToPrecision(value: number, decimals: number): number {
+  const factor = Math.pow(10, decimals)
+  return Math.round(value * factor) / factor
 }
 
 /**
@@ -105,7 +205,6 @@ function buildTickerCandidates(symbol: string, meta?: SymbolResult): string[] {
   if (candidates.length === 0) {
     // 6 uppercase letters = likely a forex pair
     if (sym.length === 6 && /^[A-Z]+$/.test(sym)) {
-      // Check commodity map
       if (COMMODITY_MAP[sym]) {
         candidates.push(COMMODITY_MAP[sym])
       }

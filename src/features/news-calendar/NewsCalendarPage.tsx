@@ -1,0 +1,439 @@
+import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { getApi } from '../../shared/lib/api'
+import { useAccount } from '../../shared/contexts/AccountContext'
+import type { Trade } from '../../shared/types/domain'
+
+// ── Types ──────────────────────────────────────────────────────────
+
+interface FfEvent {
+  title: string
+  country: string
+  date: string
+  impact: 'High' | 'Medium' | 'Low' | 'Holiday'
+  forecast?: string
+  previous?: string
+  actual?: string
+}
+
+type TabMode = 'events' | 'pnl'
+
+const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
+
+const IMPACT_COLOR: Record<string, string> = {
+  High:    '#ef4444',
+  Medium:  '#f59e0b',
+  Low:     '#3b82f6',
+  Holiday: '#6b7280',
+}
+
+const FF_THIS_WEEK = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json'
+const FF_NEXT_WEEK = 'https://nfs.faireconomy.media/ff_calendar_nextweek.json'
+const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
+
+// ── Data fetching ──────────────────────────────────────────────────
+
+async function fetchAllEvents(): Promise<FfEvent[]> {
+  if (isTauri) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const [thisWeek] = await Promise.allSettled([
+      invoke<string>('proxy_ff_calendar'),
+    ])
+    const results: FfEvent[] = []
+    if (thisWeek.status === 'fulfilled') {
+      try { results.push(...(JSON.parse(thisWeek.value) as FfEvent[])) } catch { /* ignore */ }
+    }
+    // nextWeek not available via Tauri proxy — only thisweek endpoint exists
+    return results
+  }
+
+  // Browser: fetch both endpoints directly, fall back to Vercel proxy
+  const fetchUrl = async (url: string): Promise<FfEvent[]> => {
+    try {
+      let resp = await fetch(url, { signal: AbortSignal.timeout(8000) })
+      if (!resp.ok) throw new Error('direct failed')
+      return await resp.json()
+    } catch {
+      // Fallback: only the thisweek proxy exists on Vercel
+      if (url === FF_THIS_WEEK) {
+        try {
+          const resp = await fetch('/api/ff-calendar', { signal: AbortSignal.timeout(8000) })
+          if (resp.ok) return await resp.json()
+        } catch { /* ignore */ }
+      }
+      return []
+    }
+  }
+
+  const [thisWeek, nextWeek] = await Promise.all([
+    fetchUrl(FF_THIS_WEEK),
+    fetchUrl(FF_NEXT_WEEK),
+  ])
+
+  // Deduplicate by date+title
+  const seen = new Set<string>()
+  const all: FfEvent[] = []
+  for (const ev of [...thisWeek, ...nextWeek]) {
+    const key = `${ev.date}|${ev.title}|${ev.country}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      all.push(ev)
+    }
+  }
+  return all
+}
+
+// ── Day detail modal ───────────────────────────────────────────────
+
+function DayModal({
+  day,
+  dateStr,
+  events,
+  pnlData,
+  tab,
+  onClose,
+}: {
+  day: number
+  dateStr: string
+  events: FfEvent[]
+  pnlData?: { pnl: number; trades: number }
+  tab: TabMode
+  onClose: () => void
+}) {
+  const label = new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+  })
+
+  // Close on backdrop click
+  const handleBackdrop = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) onClose()
+  }
+
+  // Sort events by time
+  const sorted = [...events].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  return (
+    <div className="ec-modal-backdrop" onClick={handleBackdrop}>
+      <div className="ec-modal">
+        <div className="ec-modal-header">
+          <h3 className="ec-modal-title">{label}</h3>
+          <button className="ec-modal-close" onClick={onClose}>×</button>
+        </div>
+
+        {tab === 'pnl' && pnlData && (
+          <div className="ec-modal-pnl">
+            <span className={`ec-modal-pnl-value ${pnlData.pnl >= 0 ? 'positive' : 'negative'}`}>
+              {pnlData.pnl >= 0 ? '+' : ''}${pnlData.pnl.toFixed(2)}
+            </span>
+            <span className="ec-modal-pnl-trades">{pnlData.trades} trade{pnlData.trades !== 1 ? 's' : ''}</span>
+          </div>
+        )}
+
+        {tab === 'pnl' && !pnlData && (
+          <p className="muted" style={{ padding: '16px 0' }}>No trades on this day.</p>
+        )}
+
+        {tab === 'events' && sorted.length === 0 && (
+          <p className="muted" style={{ padding: '16px 0' }}>No economic events on this day.</p>
+        )}
+
+        {tab === 'events' && sorted.length > 0 && (
+          <div className="ec-modal-events">
+            {sorted.map((ev, i) => {
+              const time = new Date(ev.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              const color = IMPACT_COLOR[ev.impact] || '#6b7280'
+              return (
+                <div key={i} className="ec-modal-event-row">
+                  <span className="ec-modal-event-dot" style={{ background: color }} />
+                  <div className="ec-modal-event-body">
+                    <div className="ec-modal-event-title">
+                      <span className="ec-modal-event-country">{ev.country}</span>
+                      <span>{ev.title}</span>
+                    </div>
+                    <div className="ec-modal-event-meta">
+                      <span className="ec-modal-event-time">{time}</span>
+                      {ev.forecast && <span className="ec-modal-event-stat">Forecast: <b>{ev.forecast}</b></span>}
+                      {ev.previous && <span className="ec-modal-event-stat">Previous: <b>{ev.previous}</b></span>}
+                      {ev.actual   && <span className="ec-modal-event-stat">Actual: <b>{ev.actual}</b></span>}
+                    </div>
+                  </div>
+                  <span
+                    className="ec-impact-badge"
+                    style={{ background: color + '22', color, border: `1px solid ${color}55` }}
+                  >
+                    {ev.impact}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Main page ──────────────────────────────────────────────────────
+
+export function NewsCalendarPage() {
+  const { refreshKey } = useAccount()
+  const [tab, setTab] = useState<TabMode>('events')
+  const [month, setMonth] = useState(() => {
+    const now = new Date()
+    return new Date(now.getFullYear(), now.getMonth(), 1)
+  })
+  const [selectedDay, setSelectedDay] = useState<{ day: number; dateStr: string } | null>(null)
+
+  const year  = month.getFullYear()
+  const mon   = month.getMonth()
+  const monthLabel = month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+
+  // ForexFactory events
+  const eventsQuery = useQuery({
+    queryKey: ['ff-events'],
+    queryFn: fetchAllEvents,
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+  })
+
+  // Trades for PNL tab
+  const tradesQuery = useQuery({
+    queryKey: ['trades', refreshKey],
+    queryFn: () => getApi().listTrades(),
+  })
+
+  const prevMonth = () => setMonth(new Date(year, mon - 1, 1))
+  const nextMonth = () => setMonth(new Date(year, mon + 1, 1))
+
+  // Build calendar grid cells
+  const daysInMonth = new Date(year, mon + 1, 0).getDate()
+  const firstDay    = new Date(year, mon, 1).getDay()
+  const cells: (number | null)[] = []
+  for (let i = 0; i < firstDay; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+  while (cells.length % 7 !== 0) cells.push(null)
+
+  // Events grouped by date string "YYYY-MM-DD"
+  const eventsByDay = useMemo(() => {
+    const map = new Map<string, FfEvent[]>()
+    for (const ev of eventsQuery.data ?? []) {
+      const d = ev.date.slice(0, 10)
+      const list = map.get(d) || []
+      list.push(ev)
+      map.set(d, list)
+    }
+    return map
+  }, [eventsQuery.data])
+
+  // PNL grouped by date string
+  const pnlByDay = useMemo(() => {
+    const map = new Map<string, { pnl: number; trades: number }>()
+    for (const t of (tradesQuery.data as Trade[]) ?? []) {
+      const d = t.openedAt.slice(0, 10)
+      const prev = map.get(d) || { pnl: 0, trades: 0 }
+      map.set(d, { pnl: prev.pnl + t.pnl, trades: prev.trades + 1 })
+    }
+    return map
+  }, [tradesQuery.data])
+
+  const todayStr = new Date().toISOString().slice(0, 10)
+
+  // Keyboard: close modal on Escape
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedDay(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const handleDayClick = useCallback((day: number) => {
+    const dateStr = `${year}-${String(mon + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    setSelectedDay({ day, dateStr })
+  }, [year, mon])
+
+  return (
+    <div className="ec-page">
+      {/* ── Header bar ── */}
+      <div className="ec-header card">
+        <div className="ec-header-left">
+          <h2 className="ec-title">Economic Calendar</h2>
+          <div className="ec-tabs">
+            <button
+              className={`ec-tab ${tab === 'pnl' ? 'active' : ''}`}
+              onClick={() => setTab('pnl')}
+            >
+              PNL
+            </button>
+            <button
+              className={`ec-tab ${tab === 'events' ? 'active' : ''}`}
+              onClick={() => setTab('events')}
+            >
+              Events
+            </button>
+          </div>
+        </div>
+        <div className="ec-header-right">
+          <button className="ec-nav-btn" onClick={prevMonth} title="Previous month">←</button>
+          <span className="ec-month-label">{monthLabel}</span>
+          <button className="ec-nav-btn" onClick={nextMonth} title="Next month">→</button>
+        </div>
+      </div>
+
+      {/* ── Calendar grid ── */}
+      <div className="card ec-calendar-card">
+        {eventsQuery.isLoading && tab === 'events' && (
+          <p className="muted" style={{ padding: '8px 0 12px' }}>Loading economic events…</p>
+        )}
+        {eventsQuery.isError && tab === 'events' && (
+          <p className="muted" style={{ padding: '8px 0 12px', color: 'var(--negative)' }}>
+            Could not load ForexFactory calendar. Check your connection.
+          </p>
+        )}
+
+        {/* Day headers */}
+        <div className="ec-grid">
+          {DAYS.map((d) => (
+            <div key={d} className="ec-day-header">{d}</div>
+          ))}
+
+          {/* Day cells */}
+          {cells.map((day, i) => {
+            if (day === null) return <div key={`e${i}`} className="ec-cell ec-cell-empty" />
+
+            const dateStr = `${year}-${String(mon + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+            const events  = eventsByDay.get(dateStr) || []
+            const pnlData = pnlByDay.get(dateStr)
+            const isToday = dateStr === todayStr
+
+            // Count by impact for badges
+            const highCount   = events.filter((e) => e.impact === 'High').length
+            const medCount    = events.filter((e) => e.impact === 'Medium').length
+            const lowCount    = events.filter((e) => e.impact === 'Low').length
+
+            // Cell border color driven by highest impact present
+            let borderClass = ''
+            if (tab === 'events') {
+              if (highCount > 0) borderClass = 'ec-cell-high'
+              else if (medCount > 0) borderClass = 'ec-cell-medium'
+              else if (lowCount > 0) borderClass = 'ec-cell-low'
+            } else if (tab === 'pnl' && pnlData) {
+              borderClass = pnlData.pnl >= 0 ? 'ec-cell-profit' : 'ec-cell-loss'
+            }
+
+            const todayClass = isToday ? 'ec-cell-today' : ''
+
+            // Top 2 events for preview
+            const sorted = [...events].sort((a, b) => {
+              const order = { High: 0, Medium: 1, Low: 2, Holiday: 3 }
+              return (order[a.impact] ?? 3) - (order[b.impact] ?? 3)
+            })
+            const preview = sorted.slice(0, 2)
+            const more    = sorted.length - preview.length
+
+            return (
+              <div
+                key={day}
+                className={`ec-cell ${borderClass} ${todayClass}`}
+                onClick={() => handleDayClick(day)}
+                title={`${dateStr} — ${events.length} event${events.length !== 1 ? 's' : ''}`}
+              >
+                <span className="ec-day-num">{day}</span>
+
+                {/* Events tab content */}
+                {tab === 'events' && events.length > 0 && (
+                  <>
+                    {/* Impact dot badges row */}
+                    <div className="ec-badges">
+                      {highCount > 0 && (
+                        <span className="ec-dot-badge" style={{ background: IMPACT_COLOR.High }}>
+                          {highCount}
+                        </span>
+                      )}
+                      {medCount > 0 && (
+                        <span className="ec-dot-badge" style={{ background: IMPACT_COLOR.Medium }}>
+                          {medCount}
+                        </span>
+                      )}
+                      {lowCount > 0 && (
+                        <span className="ec-dot-badge" style={{ background: IMPACT_COLOR.Low }}>
+                          {lowCount}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Preview event titles */}
+                    <div className="ec-preview-events">
+                      {preview.map((ev, idx) => (
+                        <span key={idx} className="ec-preview-event">
+                          {ev.country}: {ev.title}
+                        </span>
+                      ))}
+                      {more > 0 && (
+                        <span className="ec-preview-more">+{more} more</span>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {/* PNL tab content */}
+                {tab === 'pnl' && pnlData && (
+                  <div className="ec-pnl-cell">
+                    <span className={`ec-pnl-value ${pnlData.pnl >= 0 ? 'positive' : 'negative'}`}>
+                      {pnlData.pnl >= 0 ? '+' : ''}${pnlData.pnl.toFixed(2)}
+                    </span>
+                    <span className="ec-pnl-trades">{pnlData.trades}t</span>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* ── Legend ── */}
+        <div className="ec-legend">
+          {tab === 'events' ? (
+            <>
+              <span className="ec-legend-item">
+                <span className="ec-legend-dot" style={{ background: IMPACT_COLOR.High }} />
+                High Impact
+              </span>
+              <span className="ec-legend-item">
+                <span className="ec-legend-dot" style={{ background: IMPACT_COLOR.Medium }} />
+                Medium Impact
+              </span>
+              <span className="ec-legend-item">
+                <span className="ec-legend-dot" style={{ background: IMPACT_COLOR.Low }} />
+                Low Impact
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="ec-legend-item">
+                <span className="ec-legend-dot" style={{ background: 'var(--positive)' }} />
+                Profitable day
+              </span>
+              <span className="ec-legend-item">
+                <span className="ec-legend-dot" style={{ background: 'var(--negative)' }} />
+                Loss day
+              </span>
+            </>
+          )}
+          <span className="ec-legend-note muted">
+            Data: ForexFactory · This week &amp; next week only
+          </span>
+        </div>
+      </div>
+
+      {/* ── Day detail modal ── */}
+      {selectedDay && (
+        <DayModal
+          day={selectedDay.day}
+          dateStr={selectedDay.dateStr}
+          events={eventsByDay.get(selectedDay.dateStr) || []}
+          pnlData={pnlByDay.get(selectedDay.dateStr)}
+          tab={tab}
+          onClose={() => setSelectedDay(null)}
+        />
+      )}
+    </div>
+  )
+}

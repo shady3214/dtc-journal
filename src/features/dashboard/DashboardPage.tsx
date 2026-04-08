@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createChart, ColorType, AreaSeries, type IChartApi } from 'lightweight-charts'
 import { getApi, loadSettings, persistSettings } from '../../shared/lib/api'
 import { useNavigate } from 'react-router-dom'
-import type { EquityPoint } from '../../shared/types/domain'
+import type { EquityPoint, AiAnalysis } from '../../shared/types/domain'
 import { ProfitabilityGauges } from '../../shared/components/ProfitabilityGauges'
 import { TradingHistory } from '../../shared/components/TradingHistory'
 import { TradingCalendar } from '../../shared/components/TradingCalendar'
@@ -190,6 +190,91 @@ function ChartLightbox({ src, alt, onClose }: { src: string; alt: string; onClos
   )
 }
 
+/* ── AI Analysis Modal ────────────────────────────────────── */
+
+function AiModal({ pair, analysis, onClose }: { pair: string; analysis: AiAnalysis; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const confidencePct = Math.round(analysis.confidence * 100)
+  const confidenceColor =
+    confidencePct >= 75 ? 'var(--positive)' :
+    confidencePct >= 50 ? 'var(--accent)' :
+    'var(--negative)'
+
+  return (
+    <div className="ai-modal-backdrop" onClick={onClose}>
+      <div className="ai-modal" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="ai-modal-header">
+          <div className="ai-modal-title-row">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            <h3 className="ai-modal-title">AI Analysis</h3>
+            <span className="ai-modal-pair">{pair}</span>
+          </div>
+          <button className="ai-modal-close" onClick={onClose} title="Close">×</button>
+        </div>
+
+        {/* Badges row */}
+        <div className="ai-modal-badges">
+          {analysis.setupClassification && analysis.setupClassification !== 'unknown' && (
+            <span className="trade-ai-badge setup">{analysis.setupClassification}</span>
+          )}
+          <span className="ai-modal-confidence" style={{ color: confidenceColor }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            {confidencePct}% confidence
+          </span>
+        </div>
+
+        {/* Summary */}
+        <div className="ai-modal-section">
+          <p className="ai-modal-section-label">Summary</p>
+          <p className="ai-modal-body">{analysis.summary}</p>
+        </div>
+
+        {/* Risk feedback */}
+        {analysis.riskFeedback && (
+          <div className="ai-modal-section">
+            <p className="ai-modal-section-label">Risk Feedback</p>
+            <p className="ai-modal-body">{analysis.riskFeedback}</p>
+          </div>
+        )}
+
+        {/* Mistakes */}
+        {analysis.mistakes.length > 0 && (
+          <div className="ai-modal-section">
+            <p className="ai-modal-section-label">Mistakes Identified</p>
+            <div className="ai-modal-mistakes">
+              {analysis.mistakes.map((m, i) => (
+                <span key={i} className="trade-ai-badge mistake">
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 3 }}>
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                  {m}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <p className="ai-modal-timestamp">
+          Generated {new Date(analysis.createdAt).toLocaleString()}
+        </p>
+      </div>
+    </div>
+  )
+}
+
 export function DashboardPage() {
   const q = useQueryClient()
   const navigate = useNavigate()
@@ -197,6 +282,7 @@ export function DashboardPage() {
   const analytics = useQuery({ queryKey: ['analytics', refreshKey], queryFn: () => getApi().analytics() })
   const trades = useQuery({ queryKey: ['trades', refreshKey], queryFn: () => getApi().listTrades() })
   const [lightboxImg, setLightboxImg] = useState<{ src: string; alt: string } | null>(null)
+  const [aiModal, setAiModal] = useState<{ pair: string; analysis: AiAnalysis } | null>(null)
 
   const handleDelete = (id: string) => {
     getApi().deleteTrade(id).then(() => {
@@ -209,6 +295,9 @@ export function DashboardPage() {
     <>
       {lightboxImg && (
         <ChartLightbox src={lightboxImg.src} alt={lightboxImg.alt} onClose={() => setLightboxImg(null)} />
+      )}
+      {aiModal && (
+        <AiModal pair={aiModal.pair} analysis={aiModal.analysis} onClose={() => setAiModal(null)} />
       )}
 
       {/* Metrics row */}
@@ -302,23 +391,21 @@ export function DashboardPage() {
                 <p className="trade-row-notes">{t.notesHtml}</p>
               )}
               {t.aiAnalysis && (
-                <div className="trade-ai-summary">
-                  <div className="trade-ai-header">
-                    <span className="trade-ai-label">AI Analysis</span>
-                    {t.aiAnalysis.setupClassification && t.aiAnalysis.setupClassification !== 'unknown' && (
-                      <span className="trade-ai-badge setup">{t.aiAnalysis.setupClassification}</span>
-                    )}
-                    <span className="trade-ai-badge confidence">{Math.round(t.aiAnalysis.confidence * 100)}%</span>
-                  </div>
-                  <p className="trade-ai-text">{t.aiAnalysis.summary}</p>
-                  {t.aiAnalysis.mistakes.length > 0 && (
-                    <div className="trade-ai-mistakes">
-                      {t.aiAnalysis.mistakes.map((m, i) => (
-                        <span key={i} className="trade-ai-badge mistake">{m}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <button
+                  className="trade-ai-toggle-btn"
+                  onClick={() => setAiModal({ pair: t.pair, analysis: t.aiAnalysis! })}
+                  title="View AI analysis"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  AI Analysis
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
               )}
               <div className="trade-row-right">
                 <span className="trade-row-date">

@@ -3,6 +3,12 @@ import type { AppSettings, ThemeName } from '../../shared/types/domain'
 import { getApi, loadSettings } from '../../shared/lib/api'
 import { exportAllToExcel } from '../../shared/lib/excel'
 import { useAccount } from '../../shared/contexts/AccountContext'
+import {
+  notificationScheduler,
+  requestNotificationPermission,
+  sendTestNotification,
+  type FfEvent,
+} from '../../shared/lib/notificationScheduler'
 
 const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
 
@@ -685,6 +691,9 @@ export function SettingsPage() {
         </div>
       </section>
 
+      {/* ── Alerts & Notifications ───────────────────────────── */}
+      <NotificationsSection form={form} set={set} />
+
       {/* ── Data Management ──────────────────────────────────── */}
       <section className="card settings-section">
         <h3 className="settings-section-title">Data Management</h3>
@@ -836,5 +845,311 @@ export function SettingsPage() {
         {saved && <span className="settings-saved-badge">Settings saved</span>}
       </div>
     </div>
+  )
+}
+
+// ── Notifications Section ────────────────────────────────────────
+
+const ALL_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CHF', 'NZD']
+const MINUTES_OPTIONS = [5, 10, 15, 20, 30]
+
+function NotificationsSection({
+  form,
+  set,
+}: {
+  form: AppSettings
+  set: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void
+}) {
+  const [permStatus, setPermStatus] = useState<NotificationPermission | 'unknown'>('unknown')
+  const [calendarEvents, setCalendarEvents] = useState<FfEvent[]>([])
+  const [calendarLoading, setCalendarLoading] = useState(false)
+  const [calendarError, setCalendarError] = useState('')
+
+  // Check current browser permission on mount and keep it live
+  useEffect(() => {
+    if (!('Notification' in window)) return
+    const update = () => setPermStatus(Notification.permission)
+    update()
+    // Re-check every second so the UI reflects changes made outside the app
+    const id = setInterval(update, 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  // When user enables notifications, immediately request permission
+  const handleEnableToggle = useCallback(async () => {
+    const next = !form.notificationsEnabled
+    set('notificationsEnabled', next)
+    if (next) {
+      const perm = await requestNotificationPermission()
+      setPermStatus(perm)
+      if (perm === 'granted') {
+        notificationScheduler.restart()
+      }
+    } else {
+      notificationScheduler.stop()
+    }
+  }, [form.notificationsEnabled, set])
+
+  // Toggle a currency in the watchlist
+  const toggleCurrency = (cur: string) => {
+    const list = form.notifyCurrencies ?? []
+    const next = list.includes(cur) ? list.filter((c) => c !== cur) : [...list, cur]
+    set('notifyCurrencies', next)
+  }
+
+  // Fetch today's events for preview
+  const loadCalendar = useCallback(async () => {
+    setCalendarLoading(true)
+    setCalendarError('')
+    try {
+      let data: FfEvent[]
+      const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
+      if (isTauri) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const text = await invoke<string>('proxy_ff_calendar')
+        data = JSON.parse(text)
+      } else {
+        let resp: Response
+        try {
+          resp = await fetch('https://nfs.faireconomy.media/ff_calendar_thisweek.json', { signal: AbortSignal.timeout(8000) })
+          if (!resp.ok) throw new Error('direct failed')
+          data = await resp.json()
+        } catch {
+          resp = await fetch('/api/ff-calendar', { signal: AbortSignal.timeout(8000) })
+          if (!resp.ok) throw new Error('proxy failed')
+          data = await resp.json()
+        }
+      }
+      const today = new Date().toISOString().slice(0, 10)
+      const highToday = (data as FfEvent[])
+        .filter((e) => e.impact === 'High' && e.date.startsWith(today))
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      setCalendarEvents(highToday)
+    } catch (err) {
+      setCalendarError(String(err))
+    } finally {
+      setCalendarLoading(false)
+    }
+  }, [])
+
+  const watchedCurrencies = form.notifyCurrencies ?? ['USD', 'EUR', 'GBP', 'JPY', 'CAD']
+
+  return (
+    <section className="card settings-section">
+      <h3 className="settings-section-title">Alerts &amp; Notifications</h3>
+      <p className="muted" style={{ marginBottom: 20 }}>
+        Get desktop notifications before high-impact news events and market sessions.
+        Uses the{' '}
+        <a href="https://www.forexfactory.com/calendar" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>
+          ForexFactory calendar
+        </a>
+        {' '}— no API key required.
+      </p>
+
+      {/* Master Toggle */}
+      <div className="notif-master-row">
+        <div className="notif-master-left">
+          <span className="notif-master-label">Enable Notifications</span>
+          <span className="settings-hint">
+            {permStatus === 'denied'
+              ? '⚠️ Browser/OS has blocked notifications. Allow them in your browser/system settings, then retry.'
+              : permStatus === 'granted'
+              ? '✅ Permission granted'
+              : 'You will be prompted to allow notifications.'}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            type="button"
+            className="btn-pill btn-secondary notif-test-btn"
+            onClick={sendTestNotification}
+            title="Fire a test notification right now"
+          >
+            🔔 Test
+          </button>
+          <button
+            type="button"
+            className={`toggle-btn ${form.notificationsEnabled ? 'toggle-on' : ''}`}
+            onClick={handleEnableToggle}
+          >
+            <span className="toggle-thumb" />
+          </button>
+        </div>
+      </div>
+
+      {form.notificationsEnabled && (
+        <>
+          {/* ── News Events ─────────────────────────── */}
+          <div className="notif-subsection">
+            <div className="notif-row-header">
+              <span className="notif-row-label">📰 High-Impact News Alerts</span>
+              <button
+                type="button"
+                className={`toggle-btn ${form.notifyNewsEvents ? 'toggle-on' : ''}`}
+                onClick={() => set('notifyNewsEvents', !form.notifyNewsEvents)}
+              >
+                <span className="toggle-thumb" />
+              </button>
+            </div>
+
+            {form.notifyNewsEvents && (
+              <>
+                {/* Currency watchlist */}
+                <div className="settings-field" style={{ marginTop: 14 }}>
+                  <label className="label">Watch Currencies</label>
+                  <div className="notif-currency-pills">
+                    {ALL_CURRENCIES.map((cur) => (
+                      <button
+                        key={cur}
+                        type="button"
+                        className={`notif-currency-pill ${
+                          watchedCurrencies.includes(cur) ? 'active' : ''
+                        }`}
+                        onClick={() => toggleCurrency(cur)}
+                      >
+                        {cur}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="settings-hint">Only HIGH impact (red) events for selected currencies will alert.</span>
+                </div>
+
+                {/* Minutes before */}
+                <div className="settings-field" style={{ marginTop: 14 }}>
+                  <label className="label">Alert Time Before Event</label>
+                  <div className="notif-time-pills">
+                    {MINUTES_OPTIONS.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        className={`notif-time-pill ${
+                          (form.notifyMinutesBefore ?? 15) === m ? 'active' : ''
+                        }`}
+                        onClick={() => set('notifyMinutesBefore', m)}
+                      >
+                        {m} min
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* ── Session Alerts ──────────────────────── */}
+          <div className="notif-subsection">
+            <span className="notif-subsection-title">🕐 Session Open Alerts</span>
+
+            {/* NY Open */}
+            <div className="notif-session-row">
+              <div className="notif-session-info">
+                <span className="notif-session-name">🗽 New York Open</span>
+                <span className="settings-hint">9:30 AM ET — NYSE opens, peak USD volatility</span>
+              </div>
+              <button
+                type="button"
+                className={`toggle-btn ${form.notifyNyOpen ? 'toggle-on' : ''}`}
+                onClick={() => set('notifyNyOpen', !form.notifyNyOpen)}
+              >
+                <span className="toggle-thumb" />
+              </button>
+            </div>
+
+            {form.notifyNyOpen && (
+              <div className="settings-field" style={{ marginLeft: 16, marginTop: 8 }}>
+                <label className="label">Alert Time Before Open</label>
+                <div className="notif-time-pills">
+                  {MINUTES_OPTIONS.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={`notif-time-pill ${
+                        (form.notifyNyOpenMinutesBefore ?? 15) === m ? 'active' : ''
+                      }`}
+                      onClick={() => set('notifyNyOpenMinutesBefore', m)}
+                    >
+                      {m} min
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* London Open */}
+            <div className="notif-session-row" style={{ marginTop: 12 }}>
+              <div className="notif-session-info">
+                <span className="notif-session-name">🇬🇧 London Open</span>
+                <span className="settings-hint">8:00 AM GMT — highest liquidity session of the day</span>
+              </div>
+              <button
+                type="button"
+                className={`toggle-btn ${form.notifyLondonOpen ? 'toggle-on' : ''}`}
+                onClick={() => set('notifyLondonOpen', !form.notifyLondonOpen)}
+              >
+                <span className="toggle-thumb" />
+              </button>
+            </div>
+          </div>
+
+          {/* ── Calendar Preview ─────────────────────── */}
+          <div className="notif-subsection">
+            <div className="notif-row-header">
+              <span className="notif-subsection-title">📅 Today's High-Impact Events</span>
+              <button
+                className="btn-pill btn-secondary"
+                onClick={loadCalendar}
+                disabled={calendarLoading}
+                style={{ fontSize: 12, padding: '4px 12px' }}
+              >
+                {calendarLoading ? 'Loading...' : 'Load Calendar'}
+              </button>
+            </div>
+
+            {calendarError && (
+              <p style={{ color: 'var(--negative)', fontSize: 13, marginTop: 8 }}>
+                {calendarError}
+              </p>
+            )}
+
+            {calendarEvents.length === 0 && !calendarLoading && !calendarError && (
+              <p className="muted" style={{ marginTop: 8, fontSize: 13 }}>
+                Click "Load Calendar" to preview today's scheduled high-impact events.
+              </p>
+            )}
+
+            {calendarEvents.length > 0 && (
+              <div className="notif-calendar-list">
+                {calendarEvents.map((ev, i) => {
+                  const evTime = new Date(ev.date)
+                  const watched = watchedCurrencies.includes(ev.country)
+                  return (
+                    <div key={i} className={`notif-calendar-item ${watched ? 'watched' : 'unwatched'}`}>
+                      <div className="notif-cal-flag">
+                        <span className="notif-cal-badge" style={{ background: 'var(--negative)' }}>
+                          {ev.country}
+                        </span>
+                      </div>
+                      <div className="notif-cal-body">
+                        <span className="notif-cal-title">{ev.title}</span>
+                        <span className="notif-cal-time">
+                          {evTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {ev.forecast ? ` · Forecast: ${ev.forecast}` : ''}
+                          {ev.previous ? ` · Prev: ${ev.previous}` : ''}
+                        </span>
+                      </div>
+                      {watched && <span className="notif-cal-dot" />}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {calendarEvents.length === 0 && !calendarLoading && !calendarError && (
+              <></>
+            )}
+          </div>
+        </>
+      )}
+    </section>
   )
 }

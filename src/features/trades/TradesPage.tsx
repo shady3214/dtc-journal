@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import type { AiAnalysis, Trade } from '../../shared/types/domain'
 import { getApi, loadSettings } from '../../shared/lib/api'
 import { SymbolSearch } from '../../shared/components/SymbolSearch'
-import { fetchLivePrice } from '../../shared/lib/price'
+import { fetchLivePrice, getPricePrecision } from '../../shared/lib/price'
 import { useAccount } from '../../shared/contexts/AccountContext'
 
 const MISTAKE_CATEGORIES = [
@@ -44,6 +44,30 @@ function pipSize(pair: string): number {
   return pair.toUpperCase().includes('JPY') ? 0.01 : 0.0001
 }
 
+/**
+ * Convert a UTC ISO string to the local-time string required by datetime-local input.
+ * e.g. "2026-04-08T09:51:00.000Z" in UTC+3 → "2026-04-08T12:51"
+ */
+function toLocalDatetimeInput(isoUtc: string): string {
+  const d = new Date(isoUtc)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return (
+    d.getFullYear() + '-' +
+    pad(d.getMonth() + 1) + '-' +
+    pad(d.getDate()) + 'T' +
+    pad(d.getHours()) + ':' +
+    pad(d.getMinutes())
+  )
+}
+
+/**
+ * Convert a datetime-local input value (local time, no tz) back to UTC ISO string.
+ * e.g. "2026-04-08T12:51" in UTC+3 → "2026-04-08T09:51:00.000Z"
+ */
+function fromLocalDatetimeInput(localStr: string): string {
+  return new Date(localStr).toISOString()
+}
+
 /** Standard forex lot = 100,000 units */
 const CONTRACT = 100_000
 
@@ -63,7 +87,12 @@ export function TradesPage() {
   const aiTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [tagInput, setTagInput] = useState('')
   const [fetchingPrice, setFetchingPrice] = useState(false)
+  const [symbolType, setSymbolType] = useState('')
   const isEditing = !!form.id
+
+  // Decimal precision for price inputs based on current pair
+  const pricePrecision = getPricePrecision(form.pair, symbolType)
+  const priceStep = Math.pow(10, -pricePrecision).toFixed(pricePrecision)
 
   // If navigated here with a trade to edit, populate the form
   useEffect(() => {
@@ -73,6 +102,7 @@ export function TradesPage() {
       setAi(editTrade.aiAnalysis || null)
       setAiError('')
       setTagInput('')
+      setSymbolType('')
       // Clear the router state so a refresh doesn't re-populate
       window.history.replaceState({}, '')
     }
@@ -247,6 +277,7 @@ export function TradesPage() {
             value={form.pair}
             onChange={(symbol, result) => {
               setForm((prev) => ({ ...prev, pair: symbol }))
+              setSymbolType(result?.type || '')
               // Auto-fetch live price when a symbol is selected from dropdown
               if (result) {
                 setFetchingPrice(true)
@@ -273,15 +304,33 @@ export function TradesPage() {
         {/* Row 2: Entry + SL + TP */}
         <label className="field">
           <span>{fetchingPrice ? 'Entry Price (fetching...)' : 'Entry Price'}</span>
-          <input type="number" step="any" value={form.entry || ''} onChange={(e) => setForm({ ...form, entry: Number(e.target.value) })} placeholder="0.00000" />
+          <input
+            type="number"
+            step={priceStep}
+            value={form.entry ? form.entry.toFixed(pricePrecision) : ''}
+            onChange={(e) => setForm({ ...form, entry: Number(e.target.value) })}
+            placeholder={'0.' + '0'.repeat(pricePrecision)}
+          />
         </label>
         <label className="field">
           <span>Stop Loss</span>
-          <input type="number" step="any" value={form.stopLoss || ''} onChange={(e) => setForm({ ...form, stopLoss: Number(e.target.value) })} placeholder="0.00000" />
+          <input
+            type="number"
+            step={priceStep}
+            value={form.stopLoss ? form.stopLoss.toFixed(pricePrecision) : ''}
+            onChange={(e) => setForm({ ...form, stopLoss: Number(e.target.value) })}
+            placeholder={'0.' + '0'.repeat(pricePrecision)}
+          />
         </label>
         <label className="field">
           <span>Take Profit</span>
-          <input type="number" step="any" value={form.takeProfit || ''} onChange={(e) => setForm({ ...form, takeProfit: Number(e.target.value) })} placeholder="0.00000" />
+          <input
+            type="number"
+            step={priceStep}
+            value={form.takeProfit ? form.takeProfit.toFixed(pricePrecision) : ''}
+            onChange={(e) => setForm({ ...form, takeProfit: Number(e.target.value) })}
+            placeholder={'0.' + '0'.repeat(pricePrecision)}
+          />
         </label>
 
         {/* Row 3: Capital + Risk */}
@@ -303,8 +352,12 @@ export function TradesPage() {
 
         {/* Row 4: Date */}
         <label className="field">
-          <span>Date</span>
-          <input type="datetime-local" value={form.openedAt.slice(0, 16)} onChange={(e) => setForm({ ...form, openedAt: new Date(e.target.value).toISOString() })} />
+          <span>Date (local time)</span>
+          <input
+            type="datetime-local"
+            value={toLocalDatetimeInput(form.openedAt)}
+            onChange={(e) => setForm({ ...form, openedAt: fromLocalDatetimeInput(e.target.value) })}
+          />
         </label>
 
         {/* Commission toggle */}

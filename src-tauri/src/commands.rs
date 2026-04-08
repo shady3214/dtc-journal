@@ -37,6 +37,20 @@ pub async fn proxy_tv_search(query: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub async fn proxy_ff_calendar() -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .get("https://nfs.faireconomy.media/ff_calendar_thisweek.json")
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        .header("Accept", "application/json")
+        .header("Referer", "https://www.forexfactory.com/")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    resp.text().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn list_trades(app: AppHandle, account_id: String) -> Result<Vec<Trade>, String> {
     let conn = db::connection(&app)?;
     let mut stmt = conn.prepare("SELECT id,pair,direction,entry,stop_loss,take_profit,lot_size,capital,enable_commission,commission_per_lot,risk_percent,pnl,return_percent,status,tags_json,mistakes_json,setup,chart_image_data,notes_html,opened_at,closed_at FROM trades WHERE account_id=?1 ORDER BY opened_at DESC").map_err(|e| e.to_string())?;

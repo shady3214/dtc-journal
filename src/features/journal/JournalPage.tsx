@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getApi } from '../../shared/lib/api'
-import type { JournalEntry } from '../../shared/types/domain'
+import { getApi, analyzeJournalEntry } from '../../shared/lib/api'
+import type { JournalEntry, JournalAiFeedback } from '../../shared/types/domain'
 import { useAccount } from '../../shared/contexts/AccountContext'
 
 const BIASES = ['Bullish', 'Bearish', 'Neutral']
@@ -39,13 +39,108 @@ const emptyEntry = (date: string): JournalEntry => ({
   postGrade: '',
 })
 
+/* ── Journal AI Feedback Modal ──────────────────────────────── */
+
+function JournalAiModal({ feedback, onClose }: { feedback: JournalAiFeedback; onClose: () => void }) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
+
+  return (
+    <div className="ai-modal-backdrop" onClick={onClose}>
+      <div className="ai-modal journal-ai-modal" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="ai-modal-header">
+          <div className="ai-modal-title-row">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+            </svg>
+            <h3 className="ai-modal-title">Mentor Feedback</h3>
+            <span className="ai-modal-pair">
+              {new Date(feedback.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </span>
+          </div>
+          <button className="ai-modal-close" onClick={onClose}>×</button>
+        </div>
+
+        {/* Main mentor paragraph */}
+        <div className="journal-ai-mentor-block">
+          <p className="journal-ai-mentor-text">{feedback.mentor}</p>
+        </div>
+
+        {/* Contradiction */}
+        {feedback.contradiction && (
+          <div className="journal-ai-section journal-ai-contradiction">
+            <div className="journal-ai-section-header">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <span>Contradiction Spotted</span>
+            </div>
+            <p>{feedback.contradiction}</p>
+          </div>
+        )}
+
+        {/* Emotional flag */}
+        {feedback.emotionalFlag && (
+          <div className="journal-ai-section journal-ai-flag">
+            <div className="journal-ai-section-header">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+                <line x1="4" y1="22" x2="4" y2="15" />
+              </svg>
+              <span>Emotional Flag</span>
+            </div>
+            <p>{feedback.emotionalFlag}</p>
+          </div>
+        )}
+
+        {/* Strength */}
+        {feedback.strength && (
+          <div className="journal-ai-section journal-ai-strength">
+            <div className="journal-ai-section-header">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <span>What You Did Well</span>
+            </div>
+            <p>{feedback.strength}</p>
+          </div>
+        )}
+
+        {/* Focus question */}
+        <div className="journal-ai-section journal-ai-question">
+          <div className="journal-ai-section-header">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            <span>Sit With This Tonight</span>
+          </div>
+          <p className="journal-ai-question-text">"{feedback.focusQuestion}"</p>
+        </div>
+
+        <p className="ai-modal-timestamp">Generated {new Date(feedback.createdAt).toLocaleString()}</p>
+      </div>
+    </div>
+  )
+}
+
 /* ── Read-only summary (collapsed) ─────────────────────────── */
 
-function JournalSummary({ entry, expanded, onToggle, onEdit }: {
+function JournalSummary({ entry, expanded, onToggle, onEdit, onAiFeedback, aiBusy, hasCachedFeedback }: {
   entry: JournalEntry
   expanded: boolean
   onToggle: () => void
   onEdit: () => void
+  onAiFeedback: () => void
+  aiBusy: boolean
+  hasCachedFeedback: boolean
 }) {
   const hasPre = !!(entry.preBias || entry.preSession || entry.preLevels || entry.prePlan)
   const hasPost = !!(entry.postWentWell || entry.postWentWrong || entry.postLessons || entry.postMood || entry.postGrade)
@@ -150,6 +245,34 @@ function JournalSummary({ entry, expanded, onToggle, onEdit }: {
 
           <div className="journal-ro-actions">
             <button className="btn-secondary" onClick={onEdit}>Edit Entry</button>
+            <button
+              className="journal-ai-btn"
+              onClick={onAiFeedback}
+              disabled={aiBusy}
+            >
+              {aiBusy ? (
+                <>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="spin">
+                    <path d="M21 12a9 9 0 11-6.219-8.56" />
+                  </svg>
+                  Analysing...
+                </>
+              ) : hasCachedFeedback ? (
+                <>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                  </svg>
+                  View Feedback
+                </>
+              ) : (
+                <>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                  </svg>
+                  Mentor Feedback
+                </>
+              )}
+            </button>
           </div>
         </div>
       )}
@@ -325,9 +448,17 @@ export function JournalPage() {
   const [expanded, setExpanded] = useState(false)
   // Track whether a saved entry exists for this date
   const [hasSaved, setHasSaved] = useState(false)
+  // AI feedback
+  const [aiFeedback, setAiFeedback] = useState<JournalAiFeedback | null>(null)
+  const [showAiModal, setShowAiModal] = useState(false)
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
 
   const loadEntry = useCallback(async (d: string) => {
     setLoading(true)
+    setAiFeedback(null)
+    setShowAiModal(false)
+    setAiError(null)
     try {
       const existing = await getApi().getJournalEntry(d)
       if (existing && hasContent(existing)) {
@@ -335,6 +466,10 @@ export function JournalPage() {
         setMode('view')
         setHasSaved(true)
         setExpanded(false)
+        // Restore cached AI feedback if it was previously generated and saved
+        if (existing.aiFeedback) {
+          setAiFeedback(existing.aiFeedback)
+        }
       } else {
         setEntry(emptyEntry(d))
         setMode('edit')
@@ -349,6 +484,34 @@ export function JournalPage() {
     }
     setLoading(false)
   }, [])
+
+  const handleAiFeedback = async () => {
+    // If feedback is already cached, just open the modal (no API call)
+    if (aiFeedback) {
+      setShowAiModal(true)
+      return
+    }
+    setAiBusy(true)
+    setAiError(null)
+    try {
+      const feedback = await analyzeJournalEntry(entry)
+      setAiFeedback(feedback)
+      setShowAiModal(true)
+      // Persist the feedback onto the journal entry so it loads back next time
+      const updatedEntry = { ...entry, aiFeedback: feedback }
+      setEntry(updatedEntry)
+      await getApi().saveJournalEntry(updatedEntry)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Something went wrong.'
+      if (msg === 'NO_TRADES') {
+        setAiError('No trades logged for this day yet. Log your trades first, then come back for mentor feedback.')
+      } else {
+        setAiError(msg)
+      }
+    } finally {
+      setAiBusy(false)
+    }
+  }
 
   useEffect(() => {
     loadEntry(date)
@@ -386,6 +549,10 @@ export function JournalPage() {
 
   return (
     <>
+      {aiFeedback && showAiModal && (
+        <JournalAiModal feedback={aiFeedback} onClose={() => setShowAiModal(false)} />
+      )}
+
       {/* Date navigation */}
       <div className="journal-date-nav">
         <button className="mini-btn" onClick={() => goDay(-1)}>&larr;</button>
@@ -398,6 +565,12 @@ export function JournalPage() {
         <button className="mini-btn" onClick={() => goDay(1)}>&rarr;</button>
       </div>
 
+      {aiError && (
+        <div className="card" style={{ marginBottom: 12, padding: '12px 16px', borderColor: 'var(--danger-border)', background: 'var(--danger-bg)', color: 'var(--negative)', fontSize: 13 }}>
+          {aiError}
+        </div>
+      )}
+
       {loading ? (
         <p className="muted" style={{ textAlign: 'center', padding: 40 }}>Loading...</p>
       ) : mode === 'view' && hasSaved ? (
@@ -406,6 +579,9 @@ export function JournalPage() {
           expanded={expanded}
           onToggle={() => setExpanded(!expanded)}
           onEdit={handleEdit}
+          onAiFeedback={handleAiFeedback}
+          aiBusy={aiBusy}
+          hasCachedFeedback={!!aiFeedback}
         />
       ) : (
         <JournalForm

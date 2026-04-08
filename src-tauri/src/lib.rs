@@ -16,7 +16,8 @@ pub fn run() {
       commands::analyze_trade_image,
       commands::list_trade_analyses,
       commands::proxy_yf_quote,
-      commands::proxy_tv_search
+      commands::proxy_tv_search,
+      commands::proxy_ff_calendar
     ])
     .setup(|app| {
       #[cfg(desktop)]

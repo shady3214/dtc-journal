@@ -65,9 +65,20 @@ export interface JournalEntry {
   postLessons: string
   postMood: number
   postGrade: string
+  aiFeedback?: JournalAiFeedback   // persisted after generation (only when trades were logged)
 }
 
-export type ThemeName = 'obsidian' | 'midnight' | 'ember' | 'crimson' | 'phantom'
+export interface JournalAiFeedback {
+  date: string
+  mentor: string          // direct paragraph — the main coaching response
+  contradiction?: string  // if plan vs actual behaviour contradicted, call it out explicitly
+  strength?: string       // one specific thing done well (must be grounded in their data)
+  focusQuestion: string   // one hard reflective question to sit with
+  emotionalFlag?: string  // if emotional language detected, quote it and explain why it's a flag
+  createdAt: string
+}
+
+export type ThemeName = 'obsidian' | 'midnight' | 'ember' | 'crimson' | 'phantom' | 'white' | 'amoled'
 
 export interface TradingAccount {
   id: string
@@ -101,6 +112,15 @@ export interface AppSettings {
   ollamaUrl: string
   ollamaModel: string
   ollamaTimeoutSecs: number
+
+  // Notifications & Alerts
+  notificationsEnabled: boolean
+  notifyNewsEvents: boolean
+  notifyCurrencies: string[]         // e.g. ['USD', 'EUR', 'GBP', 'JPY', 'CAD']
+  notifyMinutesBefore: number        // minutes before news to alert
+  notifyNyOpen: boolean              // New York 9:30 AM ET alert
+  notifyLondonOpen: boolean          // London 8:00 AM GMT alert
+  notifyNyOpenMinutesBefore: number  // how many minutes before NY open
 
   // Preferences
   theme: ThemeName

@@ -5,6 +5,7 @@ import { loadSettings, persistSettings } from '../shared/lib/api'
 import { useAuth } from '../shared/contexts/AuthContext'
 import { useAccount } from '../shared/contexts/AccountContext'
 import type { ThemeName } from '../shared/types/domain'
+import { notificationScheduler, requestNotificationPermission } from '../shared/lib/notificationScheduler'
 
 const THEMES: { id: ThemeName; color: string; label: string }[] = [
   { id: 'obsidian', color: '#22c55e', label: 'Obsidian' },
@@ -12,6 +13,8 @@ const THEMES: { id: ThemeName; color: string; label: string }[] = [
   { id: 'ember', color: '#f59e0b', label: 'Ember' },
   { id: 'crimson', color: '#f43f5e', label: 'Crimson' },
   { id: 'phantom', color: '#a855f7', label: 'Phantom' },
+  { id: 'white', color: '#0ea5e9', label: 'White' },
+  { id: 'amoled', color: '#00e5ff', label: 'AMOLED' },
 ]
 
 const navItems = [
@@ -19,6 +22,7 @@ const navItems = [
   { to: '/trades', label: 'Trades', icon: 'trades' },
   { to: '/analytics', label: 'Analytics', icon: 'analytics' },
   { to: '/journal', label: 'Journal', icon: 'journal' },
+  { to: '/news-calendar', label: 'News Calendar', icon: 'news-calendar' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
 ]
 
@@ -63,6 +67,18 @@ function NavIcon({ name }: { name: string }) {
         <svg {...p}>
           <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
           <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
+        </svg>
+      )
+    case 'news-calendar':
+      return (
+        <svg {...p}>
+          <rect x="3" y="4" width="18" height="18" rx="2" />
+          <line x1="16" y1="2" x2="16" y2="6" />
+          <line x1="8" y1="2" x2="8" y2="6" />
+          <line x1="3" y1="10" x2="21" y2="10" />
+          <circle cx="8" cy="15" r="1" fill="currentColor" />
+          <circle cx="12" cy="15" r="1" fill="currentColor" />
+          <circle cx="16" cy="15" r="1" fill="currentColor" />
         </svg>
       )
     case 'settings':
@@ -116,6 +132,17 @@ export function AppShell() {
     }
     window.addEventListener('mousemove', handler)
     return () => window.removeEventListener('mousemove', handler)
+  }, [])
+
+  // Start notification scheduler
+  useEffect(() => {
+    const s = loadSettings()
+    if (s.notificationsEnabled) {
+      requestNotificationPermission().then((perm) => {
+        if (perm === 'granted') notificationScheduler.start()
+      })
+    }
+    return () => notificationScheduler.stop()
   }, [])
 
   const switchTheme = useCallback((id: ThemeName) => {
@@ -308,6 +335,8 @@ export function AppShell() {
             <h2>
               {location.pathname === '/'
                 ? 'Dashboard'
+                : location.pathname === '/news-calendar'
+                ? 'News Calendar'
                 : location.pathname.slice(1).replace(/^\w/, (c) => c.toUpperCase())}
             </h2>
             <p className="label" style={{ marginTop: 4 }}>
