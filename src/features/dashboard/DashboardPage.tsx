@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createChart, ColorType, AreaSeries, type IChartApi } from 'lightweight-charts'
-import { getApi, loadSettings, persistSettings } from '../../shared/lib/api'
+import { getApi } from '../../shared/lib/api'
 import { useNavigate } from 'react-router-dom'
 import type { EquityPoint, AiAnalysis } from '../../shared/types/domain'
 import { ProfitabilityGauges } from '../../shared/components/ProfitabilityGauges'
@@ -9,23 +9,27 @@ import { TradingHistory } from '../../shared/components/TradingHistory'
 import { TradingCalendar } from '../../shared/components/TradingCalendar'
 import { useAccount } from '../../shared/contexts/AccountContext'
 
-function loadCapital(): number {
-  return loadSettings().startingCapital || 0
-}
-
-function EquityCurve({ data }: { data: EquityPoint[] }) {
+function EquityCurve({
+  data,
+  capital,
+  onSaveCapital,
+}: {
+  data: EquityPoint[]
+  capital: number
+  onSaveCapital: (capital: number) => void
+}) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
-  const [capital, setCapital] = useState(loadCapital)
   const [capitalInput, setCapitalInput] = useState(capital ? capital.toString() : '')
 
   const handleCapitalSave = useCallback(() => {
     const val = parseFloat(capitalInput) || 0
-    setCapital(val)
-    const settings = loadSettings()
-    settings.startingCapital = val
-    persistSettings(settings)
-  }, [capitalInput])
+    onSaveCapital(val)
+  }, [capitalInput, onSaveCapital])
+
+  useEffect(() => {
+    setCapitalInput(capital ? capital.toString() : '')
+  }, [capital])
 
   useEffect(() => {
     if (!containerRef.current || data.length === 0) return
@@ -278,11 +282,15 @@ function AiModal({ pair, analysis, onClose }: { pair: string; analysis: AiAnalys
 export function DashboardPage() {
   const q = useQueryClient()
   const navigate = useNavigate()
-  const { refreshKey } = useAccount()
+  const { refreshKey, activeAccount, updateAccount } = useAccount()
   const analytics = useQuery({ queryKey: ['analytics', refreshKey], queryFn: () => getApi().analytics() })
   const trades = useQuery({ queryKey: ['trades', refreshKey], queryFn: () => getApi().listTrades() })
   const [lightboxImg, setLightboxImg] = useState<{ src: string; alt: string } | null>(null)
   const [aiModal, setAiModal] = useState<{ pair: string; analysis: AiAnalysis } | null>(null)
+
+  const handleCapitalSave = useCallback((capital: number) => {
+    updateAccount(activeAccount.id, { capital })
+  }, [activeAccount.id, updateAccount])
 
   const handleDelete = (id: string) => {
     getApi().deleteTrade(id).then(() => {
@@ -324,7 +332,7 @@ export function DashboardPage() {
       <ProfitabilityGauges trades={trades.data ?? []} />
 
       {/* Equity curve */}
-      <EquityCurve data={analytics.data?.equityCurve ?? []} />
+      <EquityCurve data={analytics.data?.equityCurve ?? []} capital={activeAccount.capital} onSaveCapital={handleCapitalSave} />
 
       {/* Trading calendar */}
       <TradingCalendar trades={trades.data ?? []} />

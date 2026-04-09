@@ -205,9 +205,14 @@ function acctKey(base: string): string {
   return `${base}_${acctId}`
 }
 
-function loadTrades(): Trade[] {
+function acctKeyFor(base: string, accountId: string): string {
+  if (accountId === DEFAULT_ACCOUNT_ID) return base
+  return `${base}_${accountId}`
+}
+
+function loadTrades(accountId = getActiveAccountId()): Trade[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(acctKey(STORAGE_KEY)) || '[]')
+    const raw = JSON.parse(localStorage.getItem(acctKeyFor(STORAGE_KEY, accountId)) || '[]')
     // Migration: ensure new fields exist on old trades
     return raw.map((t: any) => ({
       ...t,
@@ -223,9 +228,9 @@ function persistTrades(trades: Trade[]) {
   localStorage.setItem(acctKey(STORAGE_KEY), JSON.stringify(trades))
 }
 
-function loadJournalEntries(): Record<string, JournalEntry> {
+function loadJournalEntries(accountId = getActiveAccountId()): Record<string, JournalEntry> {
   try {
-    return JSON.parse(localStorage.getItem(acctKey(JOURNAL_KEY)) || '{}')
+    return JSON.parse(localStorage.getItem(acctKeyFor(JOURNAL_KEY, accountId)) || '{}')
   } catch {
     return {}
   }
@@ -675,6 +680,13 @@ const browserApi = {
     return JSON.stringify({ trades, journals, settings, exportedAt: new Date().toISOString() }, null, 2)
   },
 
+  exportAccountData: async (accountId: string): Promise<string> => {
+    const trades = loadTrades(accountId)
+    const journals = loadJournalEntries(accountId)
+    const settings = loadSettings()
+    return JSON.stringify({ trades, journals, settings, exportedAt: new Date().toISOString() }, null, 2)
+  },
+
   importAllData: async (json: string): Promise<{ trades: number; journals: number }> => {
     const data = JSON.parse(json)
     if (data.trades && Array.isArray(data.trades)) {
@@ -684,7 +696,14 @@ const browserApi = {
       persistJournalEntries(data.journals)
     }
     if (data.settings && typeof data.settings === 'object') {
-      persistSettings({ ...DEFAULT_SETTINGS, ...data.settings })
+      const currentSettings = loadSettings()
+      persistSettings({
+        ...DEFAULT_SETTINGS,
+        ...currentSettings,
+        ...data.settings,
+        accounts: currentSettings.accounts,
+        activeAccountId: currentSettings.activeAccountId,
+      })
     }
     return {
       trades: data.trades?.length || 0,
@@ -749,18 +768,19 @@ export function setSupabaseUserId(userId: string | null) {
 function getSupabaseApi() {
   const userId = _supabaseUserId
   if (!userId) throw new Error('Not authenticated')
+  const accountId = getActiveAccountId()
 
   return {
-    listTrades: () => dbListTrades(userId),
+    listTrades: () => dbListTrades(userId, accountId),
 
     saveTrade: async (trade: Trade): Promise<Trade> => {
-      return dbSaveTrade(trade, userId)
+      return dbSaveTrade(trade, userId, accountId)
     },
 
-    deleteTrade: (id: string) => dbDeleteTrade(id),
+    deleteTrade: (id: string) => dbDeleteTrade(id, userId, accountId),
 
     monthStats: async (_year: number, _month: number): Promise<CalendarDayStat[]> => {
-      const trades = await dbListTrades(userId)
+      const trades = await dbListTrades(userId, accountId)
       const map = new Map<string, { count: number; pnl: number }>()
       for (const t of trades) {
         const d = t.openedAt.slice(0, 10)
@@ -771,7 +791,7 @@ function getSupabaseApi() {
     },
 
     analytics: async (): Promise<AnalyticsSummary> => {
-      const all = await dbListTrades(userId)
+      const all = await dbListTrades(userId, accountId)
       const wins = all.filter((t) => t.pnl > 0)
       const losses = all.filter((t) => t.pnl < 0)
       const totalPnl = all.reduce((s, t) => s + t.pnl, 0)
@@ -796,12 +816,12 @@ function getSupabaseApi() {
       return { winRate, avgWin, avgLoss, totalPnl, riskReward, equityCurve }
     },
 
-    getJournalEntry: (date: string) => dbGetJournalEntry(userId, date),
-    saveJournalEntry: (entry: JournalEntry) => dbSaveJournalEntry(entry, userId),
-    listJournalEntries: () => dbListJournalEntries(userId),
+    getJournalEntry: (date: string) => dbGetJournalEntry(userId, accountId, date),
+    saveJournalEntry: (entry: JournalEntry) => dbSaveJournalEntry(entry, userId, accountId),
+    listJournalEntries: () => dbListJournalEntries(userId, accountId),
 
     analyzeTradeImage: async (tradeId: string, _imagePath: string): Promise<AiAnalysis> => {
-      const trades = await dbListTrades(userId)
+      const trades = await dbListTrades(userId, accountId)
       const trade = trades.find((t) => t.id === tradeId)
       if (!trade) throw new Error('Trade not found')
       if (!trade.chartImageData) throw new Error('No chart image to analyze')
@@ -833,13 +853,28 @@ function getSupabaseApi() {
 
     listTradeAnalyses: async (_tradeId: string): Promise<AiAnalysis[]> => [],
 
-    getSettings: () => dbGetSettings(userId),
-    saveSettings: (settings: AppSettings) => dbSaveSettings(settings, userId),
+    saveSettings: async (settings: AppSettings) => {
+      const saved = await dbSaveSettings(settings, userId)
+      persistSettings(saved)
+      return saved
+    },
 
-    exportAllData: () => dbExportAllData(userId),
-    importAllData: (json: string) => dbImportAllData(json, userId),
-    clearTrades: () => dbClearTrades(userId),
-    clearJournals: () => dbClearJournals(userId),
+    getSettings: async () => {
+      const settings = await dbGetSettings(userId)
+      persistSettings(settings)
+      return settings
+    },
+
+    exportAllData: () => dbExportAllData(userId, accountId),
+    exportAccountData: (targetAccountId: string) => dbExportAllData(userId, targetAccountId),
+    importAllData: async (json: string) => {
+      const result = await dbImportAllData(json, userId, accountId)
+      const settings = await dbGetSettings(userId)
+      persistSettings(settings)
+      return result
+    },
+    clearTrades: () => dbClearTrades(userId, accountId),
+    clearJournals: () => dbClearJournals(userId, accountId),
     clearAllData: () => dbClearAllData(userId),
   }
 }

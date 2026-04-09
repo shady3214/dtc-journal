@@ -1,7 +1,8 @@
-import { createContext, useContext, useState, useCallback } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import type { ReactNode } from 'react'
 import type { TradingAccount } from '../types/domain'
-import { loadSettings, persistSettings } from '../lib/api'
+import { getApi, loadSettings, persistSettings } from '../lib/api'
+import { useAuth } from './AuthContext'
 
 interface AccountState {
   accounts: TradingAccount[]
@@ -17,22 +18,37 @@ interface AccountState {
 const AccountContext = createContext<AccountState | null>(null)
 
 export function AccountProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
   const [settings, setSettings] = useState(() => loadSettings())
   const [refreshKey, setRefreshKey] = useState(0)
 
   const accounts = settings.accounts
   const activeAccount = accounts.find((a) => a.id === settings.activeAccountId) || accounts[0]
 
-  const persist = useCallback((updated: typeof settings) => {
+  const persist = useCallback(async (updated: typeof settings) => {
     setSettings(updated)
     persistSettings(updated)
-  }, [])
+    if (user) {
+      await getApi().saveSettings(updated)
+    }
+  }, [user])
+
+  useEffect(() => {
+    if (!user) {
+      setSettings(loadSettings())
+      return
+    }
+
+    getApi().getSettings()
+      .then((cloudSettings) => setSettings(cloudSettings))
+      .catch(() => setSettings(loadSettings()))
+  }, [user])
 
   const switchAccount = useCallback((id: string) => {
     const s = loadSettings()
     if (s.accounts.some((a) => a.id === id)) {
       s.activeAccountId = id
-      persist(s)
+      void persist(s)
       setRefreshKey((k) => k + 1)
     }
   }, [persist])
@@ -47,7 +63,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       createdAt: new Date().toISOString(),
     }
     s.accounts.push(newAcct)
-    persist(s)
+    void persist(s)
     return newAcct
   }, [persist])
 
@@ -58,7 +74,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       if (updates.name !== undefined) acct.name = updates.name
       if (updates.capital !== undefined) acct.capital = updates.capital
       if (updates.description !== undefined) acct.description = updates.description
-      persist(s)
+      void persist(s)
     }
   }, [persist])
 
@@ -72,7 +88,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       s.activeAccountId = s.accounts[0].id
       setRefreshKey((k) => k + 1)
     }
-    persist(s)
+    void persist(s)
   }, [persist])
 
   return (

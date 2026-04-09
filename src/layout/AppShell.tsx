@@ -1,7 +1,7 @@
 import dayjs from 'dayjs'
 import { useEffect, useState, useCallback } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { loadSettings, persistSettings } from '../shared/lib/api'
+import { getApi, loadSettings, persistSettings } from '../shared/lib/api'
 import { useAuth } from '../shared/contexts/AuthContext'
 import { useAccount } from '../shared/contexts/AccountContext'
 import type { ThemeName } from '../shared/types/domain'
@@ -120,10 +120,12 @@ export function AppShell() {
     localStorage.setItem('journal-theme', theme)
   }, [theme])
 
-  // Refresh display name when navigating (picks up settings changes)
+  // Refresh synced settings-derived UI when navigating/account changes
   useEffect(() => {
-    setDisplayName(loadSettings().displayName || '')
-  }, [location.pathname])
+    const s = loadSettings()
+    setDisplayName(s.displayName || '')
+    setTheme(s.theme || 'obsidian')
+  }, [location.pathname, activeAccount.id, accounts.length])
 
   // Persist sidebar state
   useEffect(() => {
@@ -156,6 +158,7 @@ export function AppShell() {
     const settings = loadSettings()
     settings.theme = id
     persistSettings(settings)
+    void getApi().saveSettings(settings)
   }, [])
 
   const cycleTheme = useCallback(() => {

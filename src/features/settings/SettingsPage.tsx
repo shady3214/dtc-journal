@@ -22,6 +22,14 @@ const THEMES: { id: ThemeName; color: string; label: string }[] = [
   { id: 'amoled', color: '#00e5ff', label: 'AMOLED' },
 ]
 
+function slugifyAccountName(name: string) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'account'
+}
+
 export function SettingsPage() {
   const [form, setForm] = useState<AppSettings>(() => loadSettings())
   const [saved, setSaved] = useState(false)
@@ -132,6 +140,10 @@ export function SettingsPage() {
     setTimeout(() => setSaved(false), 2000)
   }, [form])
 
+  useEffect(() => {
+    setForm(loadSettings())
+  }, [accounts, activeAccount.id])
+
   // Test AI connection
   const testAi = useCallback(async () => {
     setAiStatus('testing')
@@ -218,6 +230,27 @@ export function SettingsPage() {
       setTimeout(() => setDataNotice(''), 3000)
     } catch {
       setDataNotice('Export failed.')
+      setTimeout(() => setDataNotice(''), 3000)
+    }
+  }, [])
+
+  const handleAccountExport = useCallback(async (accountId: string, accountName: string) => {
+    try {
+      const api = getApi() as { exportAllData: () => Promise<string>; exportAccountData?: (accountId: string) => Promise<string> }
+      const json = api.exportAccountData
+        ? await api.exportAccountData(accountId)
+        : await api.exportAllData()
+      const blob = new Blob([json], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `dtc-journal-${slugifyAccountName(accountName)}-backup-${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      setDataNotice(`${accountName} backup exported successfully.`)
+      setTimeout(() => setDataNotice(''), 3000)
+    } catch {
+      setDataNotice(`Failed to export backup for ${accountName}.`)
       setTimeout(() => setDataNotice(''), 3000)
     }
   }, [])
@@ -736,6 +769,23 @@ export function SettingsPage() {
             <p className="muted">Restore from a previously exported JSON backup. This replaces existing data.</p>
             <input type="file" accept=".json" ref={fileRef} onChange={handleImport} style={{ display: 'none' }} />
             <button className="btn-pill btn-secondary" onClick={() => fileRef.current?.click()}>Import JSON</button>
+          </div>
+        </div>
+        <div className="settings-account-backups">
+          <h4 className="settings-account-backups-title">Backup Individual Accounts</h4>
+          <p className="muted">Export a separate JSON backup for each trading account using its account name.</p>
+          <div className="settings-account-backup-list">
+            {accounts.map((acct) => (
+              <div key={acct.id} className="settings-account-backup-item">
+                <div>
+                  <div className="settings-account-backup-name">{acct.name}</div>
+                  <div className="settings-account-backup-meta">{acct.id === activeAccount.id ? 'Currently active' : 'Inactive account'}</div>
+                </div>
+                <button className="btn-pill btn-secondary" onClick={() => handleAccountExport(acct.id, acct.name)}>
+                  Export {acct.name}
+                </button>
+              </div>
+            ))}
           </div>
         </div>
         {dataNotice && <p className="settings-data-notice">{dataNotice}</p>}

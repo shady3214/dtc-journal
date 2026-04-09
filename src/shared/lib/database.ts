@@ -4,10 +4,11 @@ import { DEFAULT_SETTINGS } from './api'
 
 // ── Helper: Trade object ↔ DB row mapping ───────────────────
 
-function tradeToRow(trade: Trade, userId: string) {
+function tradeToRow(trade: Trade, userId: string, accountId: string) {
   return {
     id: trade.id,
     user_id: userId,
+    account_id: accountId,
     pair: trade.pair,
     direction: trade.direction,
     entry: trade.entry,
@@ -61,9 +62,10 @@ function rowToTrade(row: any): Trade {
 
 // ── Journal mapping ─────────────────────────────────────────
 
-function journalToRow(entry: JournalEntry, userId: string) {
+function journalToRow(entry: JournalEntry, userId: string, accountId: string) {
   return {
     user_id: userId,
+    account_id: accountId,
     date: entry.date,
     pre_bias: entry.preBias,
     pre_session: entry.preSession,
@@ -94,19 +96,20 @@ function rowToJournal(row: any): JournalEntry {
 
 // ── Trades ──────────────────────────────────────────────────
 
-export async function dbListTrades(userId: string): Promise<Trade[]> {
+export async function dbListTrades(userId: string, accountId: string): Promise<Trade[]> {
   const { data, error } = await supabase
     .from('trades')
     .select('*')
     .eq('user_id', userId)
+    .eq('account_id', accountId)
     .order('opened_at', { ascending: false })
 
   if (error) throw new Error(`Failed to load trades: ${error.message}`)
   return (data || []).map(rowToTrade)
 }
 
-export async function dbSaveTrade(trade: Trade, userId: string): Promise<Trade> {
-  const row = tradeToRow(trade, userId)
+export async function dbSaveTrade(trade: Trade, userId: string, accountId: string): Promise<Trade> {
+  const row = tradeToRow(trade, userId, accountId)
   const { error } = await supabase
     .from('trades')
     .upsert(row, { onConflict: 'id' })
@@ -115,22 +118,25 @@ export async function dbSaveTrade(trade: Trade, userId: string): Promise<Trade> 
   return trade
 }
 
-export async function dbDeleteTrade(id: string): Promise<void> {
+export async function dbDeleteTrade(id: string, userId: string, accountId: string): Promise<void> {
   const { error } = await supabase
     .from('trades')
     .delete()
     .eq('id', id)
+    .eq('user_id', userId)
+    .eq('account_id', accountId)
 
   if (error) throw new Error(`Failed to delete trade: ${error.message}`)
 }
 
 // ── Journal Entries ─────────────────────────────────────────
 
-export async function dbGetJournalEntry(userId: string, date: string): Promise<JournalEntry | null> {
+export async function dbGetJournalEntry(userId: string, accountId: string, date: string): Promise<JournalEntry | null> {
   const { data, error } = await supabase
     .from('journal_entries')
     .select('*')
     .eq('user_id', userId)
+    .eq('account_id', accountId)
     .eq('date', date)
     .maybeSingle()
 
@@ -138,21 +144,22 @@ export async function dbGetJournalEntry(userId: string, date: string): Promise<J
   return data ? rowToJournal(data) : null
 }
 
-export async function dbSaveJournalEntry(entry: JournalEntry, userId: string): Promise<JournalEntry> {
-  const row = journalToRow(entry, userId)
+export async function dbSaveJournalEntry(entry: JournalEntry, userId: string, accountId: string): Promise<JournalEntry> {
+  const row = journalToRow(entry, userId, accountId)
   const { error } = await supabase
     .from('journal_entries')
-    .upsert(row, { onConflict: 'user_id,date' })
+    .upsert(row, { onConflict: 'user_id,account_id,date' })
 
   if (error) throw new Error(`Failed to save journal entry: ${error.message}`)
   return entry
 }
 
-export async function dbListJournalEntries(userId: string): Promise<JournalEntry[]> {
+export async function dbListJournalEntries(userId: string, accountId: string): Promise<JournalEntry[]> {
   const { data, error } = await supabase
     .from('journal_entries')
     .select('*')
     .eq('user_id', userId)
+    .eq('account_id', accountId)
     .order('date', { ascending: false })
 
   if (error) throw new Error(`Failed to load journal entries: ${error.message}`)
@@ -187,25 +194,37 @@ export async function dbSaveSettings(settings: AppSettings, userId: string): Pro
 
 // ── Data Management ─────────────────────────────────────────
 
-export async function dbClearTrades(userId: string): Promise<void> {
+export async function dbClearTrades(userId: string, accountId: string): Promise<void> {
   const { error } = await supabase
     .from('trades')
     .delete()
     .eq('user_id', userId)
+    .eq('account_id', accountId)
   if (error) throw new Error(`Failed to clear trades: ${error.message}`)
 }
 
-export async function dbClearJournals(userId: string): Promise<void> {
+export async function dbClearJournals(userId: string, accountId: string): Promise<void> {
   const { error } = await supabase
     .from('journal_entries')
     .delete()
     .eq('user_id', userId)
+    .eq('account_id', accountId)
   if (error) throw new Error(`Failed to clear journals: ${error.message}`)
 }
 
 export async function dbClearAllData(userId: string): Promise<void> {
-  await dbClearTrades(userId)
-  await dbClearJournals(userId)
+  const { error: tradeError } = await supabase
+    .from('trades')
+    .delete()
+    .eq('user_id', userId)
+  if (tradeError) throw new Error(`Failed to clear trades: ${tradeError.message}`)
+
+  const { error: journalError } = await supabase
+    .from('journal_entries')
+    .delete()
+    .eq('user_id', userId)
+  if (journalError) throw new Error(`Failed to clear journals: ${journalError.message}`)
+
   const { error } = await supabase
     .from('user_settings')
     .delete()
@@ -213,16 +232,17 @@ export async function dbClearAllData(userId: string): Promise<void> {
   if (error) throw new Error(`Failed to clear settings: ${error.message}`)
 }
 
-export async function dbExportAllData(userId: string): Promise<string> {
-  const trades = await dbListTrades(userId)
-  const journals = await dbListJournalEntries(userId)
+export async function dbExportAllData(userId: string, accountId: string): Promise<string> {
+  const trades = await dbListTrades(userId, accountId)
+  const journals = await dbListJournalEntries(userId, accountId)
   const settings = await dbGetSettings(userId)
   return JSON.stringify({ trades, journals, settings, exportedAt: new Date().toISOString() }, null, 2)
 }
 
 export async function dbImportAllData(
   json: string,
-  userId: string
+  userId: string,
+  accountId: string
 ): Promise<{ trades: number; journals: number }> {
   const data = JSON.parse(json)
   let tradeCount = 0
@@ -230,7 +250,7 @@ export async function dbImportAllData(
 
   if (data.trades && Array.isArray(data.trades)) {
     for (const trade of data.trades) {
-      await dbSaveTrade(trade, userId)
+      await dbSaveTrade(trade, userId, accountId)
     }
     tradeCount = data.trades.length
   }
@@ -241,13 +261,20 @@ export async function dbImportAllData(
       ? data.journals
       : Object.values(data.journals)
     for (const entry of entries) {
-      await dbSaveJournalEntry(entry, userId)
+      await dbSaveJournalEntry(entry, userId, accountId)
     }
     journalCount = entries.length
   }
 
   if (data.settings && typeof data.settings === 'object') {
-    await dbSaveSettings({ ...DEFAULT_SETTINGS, ...data.settings }, userId)
+    const currentSettings = await dbGetSettings(userId)
+    await dbSaveSettings({
+      ...DEFAULT_SETTINGS,
+      ...currentSettings,
+      ...data.settings,
+      accounts: currentSettings.accounts,
+      activeAccountId: currentSettings.activeAccountId,
+    }, userId)
   }
 
   return { trades: tradeCount, journals: journalCount }

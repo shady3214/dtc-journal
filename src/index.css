@@ -2995,6 +2995,48 @@ input[type="file"]::file-selector-button {
   font-weight: 500;
 }
 
+.settings-account-backups {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-account-backups-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.settings-account-backup-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.settings-account-backup-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-1);
+}
+
+.settings-account-backup-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.settings-account-backup-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
 /* Danger Zone */
 .settings-danger {
   border-color: var(--danger-border) !important;
