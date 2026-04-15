@@ -39,7 +39,9 @@ pub async fn proxy_tv_search(query: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn proxy_ff_calendar() -> Result<String, String> {
     let client = reqwest::Client::new();
-    let resp = client
+    let mut all: Vec<serde_json::Value> = Vec::new();
+
+    let this_week_resp = client
         .get("https://nfs.faireconomy.media/ff_calendar_thisweek.json")
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
         .header("Accept", "application/json")
@@ -47,7 +49,27 @@ pub async fn proxy_ff_calendar() -> Result<String, String> {
         .send()
         .await
         .map_err(|e| e.to_string())?;
-    resp.text().await.map_err(|e| e.to_string())
+    if this_week_resp.status().is_success() {
+        let text = this_week_resp.text().await.map_err(|e| e.to_string())?;
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap_or_default();
+        all.extend(parsed);
+    }
+
+    let next_week_resp = client
+        .get("https://nfs.faireconomy.media/ff_calendar_nextweek.json")
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        .header("Accept", "application/json")
+        .header("Referer", "https://www.forexfactory.com/")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if next_week_resp.status().is_success() {
+        let text = next_week_resp.text().await.map_err(|e| e.to_string())?;
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap_or_default();
+        all.extend(parsed);
+    }
+
+    serde_json::to_string(&all).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

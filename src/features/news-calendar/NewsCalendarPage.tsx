@@ -30,10 +30,30 @@ const IMPACT_COLOR: Record<string, string> = {
 const FF_THIS_WEEK = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json'
 const FF_NEXT_WEEK = 'https://nfs.faireconomy.media/ff_calendar_nextweek.json'
 const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
+const FF_EVENTS_CACHE_KEY = 'ff-events-cache-v1'
 
 // ── Data fetching ──────────────────────────────────────────────────
 
 async function fetchAllEvents(): Promise<FfEvent[]> {
+  const readCachedEvents = (): FfEvent[] => {
+    try {
+      const raw = localStorage.getItem(FF_EVENTS_CACHE_KEY)
+      if (!raw) return []
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? parsed as FfEvent[] : []
+    } catch {
+      return []
+    }
+  }
+
+  const writeCachedEvents = (events: FfEvent[]) => {
+    try {
+      localStorage.setItem(FF_EVENTS_CACHE_KEY, JSON.stringify(events))
+    } catch {
+      // Ignore storage quota or private-mode failures.
+    }
+  }
+
   const safeJsonFetch = async (url: string): Promise<FfEvent[]> => {
     try {
       const resp = await fetch(url, { signal: AbortSignal.timeout(9000) })
@@ -86,7 +106,13 @@ async function fetchAllEvents(): Promise<FfEvent[]> {
 
   // Sort so rendering and month bounds are deterministic.
   all.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-  return all
+  if (all.length > 0) {
+    writeCachedEvents(all)
+    return all
+  }
+
+  // Last known good payload keeps calendar usable during temporary outages.
+  return readCachedEvents()
 }
 
 // ── Day detail modal ───────────────────────────────────────────────
