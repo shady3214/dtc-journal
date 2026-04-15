@@ -1,6 +1,6 @@
 [package]
 name = "journal"
-version = "0.1.6"
+version = "0.1.7"
 description = "DTC Forex Trade Journal"
 authors = ["you"]
 license = ""
@@ -34,4 +34,5 @@ tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+
 
