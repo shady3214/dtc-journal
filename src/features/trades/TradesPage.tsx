@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { AiAnalysis, Trade } from '../../shared/types/domain'
 import { getApi, loadSettings } from '../../shared/lib/api'
@@ -113,6 +113,16 @@ export function TradesPage() {
   // Decimal precision for price inputs based on current pair
   const pricePrecision = getPricePrecision(form.pair, symbolType)
   const priceStep = Math.pow(10, -pricePrecision).toFixed(pricePrecision)
+  const existingTrades = useQuery({ queryKey: ['trades', refreshKey], queryFn: () => getApi().listTrades() })
+  const suggestedTags = useMemo(() => {
+    const set = new Set<string>()
+    for (const t of existingTrades.data ?? []) {
+      for (const tag of t.tags ?? []) {
+        if (tag.trim()) set.add(tag.trim())
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [existingTrades.data])
 
   // If navigated here with a trade to edit, populate the form
   useEffect(() => {
@@ -126,8 +136,9 @@ export function TradesPage() {
       setAiError('')
       setTagInput('')
       setSymbolType('')
-      setDirectPnl(false)
-      setDirectPnlValue('')
+      const editIsDirect = (editTrade.entry === 0 && editTrade.stopLoss === 0 && editTrade.takeProfit === 0 && editTrade.lotSize === 0)
+      setDirectPnl(editIsDirect)
+      setDirectPnlValue(editIsDirect ? String(editTrade.pnl ?? '') : '')
       // Clear the router state so a refresh doesn't re-populate
       window.history.replaceState({}, '')
     }
@@ -200,11 +211,20 @@ export function TradesPage() {
     }
   }, [directPnl, directPnlValue, form.pair, form.entry, form.stopLoss, form.takeProfit, form.capital, form.riskPercent, form.direction, form.enableCommission, form.commissionPerLot])
 
+  useEffect(() => {
+    if (directPnl && !directPnlValue) {
+      setDirectPnlValue(String(form.pnl || ''))
+    }
+    // Only react to mode toggles and existing pnl seed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directPnl, form.pnl])
+
   // ── Tag helpers ────────────────────────────────────────────
 
   const addTag = (value: string) => {
     const tag = value.trim()
-    if (!tag || form.tags.includes(tag)) return
+    const tagLower = tag.toLowerCase()
+    if (!tag || form.tags.some((t) => t.toLowerCase() === tagLower)) return
     setForm((p) => ({ ...p, tags: [...p.tags, tag] }))
     setTagInput('')
   }
@@ -609,9 +629,25 @@ export function TradesPage() {
             onChange={(e) => setTagInput(e.target.value)}
             onKeyDown={handleTagKeyDown}
             onBlur={() => addTag(tagInput)}
+            list="existing-trade-tags"
             placeholder={form.tags.length === 0 ? 'e.g. Break & Retest, FVG, OB (press Enter)' : 'Add tag...'}
           />
+          <datalist id="existing-trade-tags">
+            {suggestedTags.map((tag) => (
+              <option key={tag} value={tag} />
+            ))}
+          </datalist>
         </div>
+        {suggestedTags.length > 0 && (
+          <div className="trade-tag-suggestions">
+            <span className="muted" style={{ fontSize: 11 }}>Previously used:</span>
+            {suggestedTags.slice(0, 10).map((tag) => (
+              <button key={tag} type="button" className="mini-btn" onClick={() => addTag(tag)}>
+                {tag}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Mistakes */}

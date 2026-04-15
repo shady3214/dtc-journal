@@ -85,11 +85,13 @@ function journalToRow(entry: JournalEntry, userId: string, accountId: string) {
     pre_session: entry.preSession,
     pre_levels: entry.preLevels,
     pre_plan: entry.prePlan,
+    pre_screenshots: entry.preScreenshots || [],
     post_went_well: entry.postWentWell,
     post_went_wrong: entry.postWentWrong,
     post_lessons: entry.postLessons,
     post_mood: entry.postMood,
     post_grade: entry.postGrade,
+    ai_feedback: entry.aiFeedback || null,
   }
 }
 
@@ -100,11 +102,13 @@ function rowToJournal(row: any): JournalEntry {
     preSession: row.pre_session,
     preLevels: row.pre_levels,
     prePlan: row.pre_plan,
+    preScreenshots: row.pre_screenshots || [],
     postWentWell: row.post_went_well,
     postWentWrong: row.post_went_wrong,
     postLessons: row.post_lessons,
     postMood: row.post_mood,
     postGrade: row.post_grade,
+    aiFeedback: row.ai_feedback || undefined,
   }
 }
 

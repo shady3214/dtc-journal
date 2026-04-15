@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { AppSettings, ThemeName } from '../../shared/types/domain'
 import { getApi, loadSettings } from '../../shared/lib/api'
 import { exportAllToExcel } from '../../shared/lib/excel'
@@ -13,9 +14,6 @@ import {
 const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
 
 const THEMES: { id: ThemeName; color: string; label: string }[] = [
-  { id: 'obsidian', color: '#22c55e', label: 'Obsidian' },
-  { id: 'midnight', color: '#639bff', label: 'Midnight' },
-  { id: 'phantom',  color: '#c084fc', label: 'Phantom'  },
   { id: 'white',    color: '#3b7ef5', label: 'White'    },
   { id: 'amoled',   color: '#00e5ff', label: 'AMOLED'   },
 ]
@@ -29,10 +27,9 @@ function slugifyAccountName(name: string) {
 }
 
 export function SettingsPage() {
+  const navigate = useNavigate()
   const [form, setForm] = useState<AppSettings>(() => loadSettings())
   const [saved, setSaved] = useState(false)
-  const [aiStatus, setAiStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle')
-  const [aiError, setAiError] = useState('')
   const [confirmAction, setConfirmAction] = useState<string | null>(null)
   const [dataNotice, setDataNotice] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -146,77 +143,6 @@ export function SettingsPage() {
   useEffect(() => {
     setForm(loadSettings())
   }, [accounts, activeAccount.id])
-
-  // Test AI connection
-  const testAi = useCallback(async () => {
-    setAiStatus('testing')
-    setAiError('')
-    try {
-      if (form.aiProvider === 'groq') {
-        // Test Groq
-        if (!form.groqApiKey) {
-          setAiStatus('fail')
-          setAiError('Enter your Groq API key first. Get one free at https://console.groq.com/keys')
-          return
-        }
-        const resp = await fetch('https://api.groq.com/openai/v1/models', {
-          headers: { 'Authorization': `Bearer ${form.groqApiKey}` },
-        })
-        if (!resp.ok) {
-          if (resp.status === 401) throw new Error('Invalid API key.')
-          throw new Error(`HTTP ${resp.status}`)
-        }
-        const data = await resp.json()
-        const models: string[] = (data.data || []).map((m: any) => m.id)
-        const hasModel = models.some((n) => n === form.groqModel)
-        if (hasModel) {
-          setAiStatus('ok')
-          setAiError(`Connected. Model "${form.groqModel}" available.`)
-        } else {
-          setAiStatus('fail')
-          setAiError(`Connected but model "${form.groqModel}" not found. Available vision models: ${models.filter((n) => n.includes('vision') || n.includes('scout')).join(', ') || 'check console.groq.com'}`)
-        }
-      } else if (form.aiProvider === 'gemini') {
-        // Test Gemini by listing models
-        if (!form.geminiApiKey) {
-          setAiStatus('fail')
-          setAiError('Enter your Gemini API key first. Get one free at https://aistudio.google.com/apikey')
-          return
-        }
-        const resp = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${form.geminiModel || 'gemini-2.0-flash'}?key=${form.geminiApiKey}`
-        )
-        if (!resp.ok) {
-          const body = await resp.text()
-          if (resp.status === 400 || body.includes('API_KEY_INVALID')) {
-            throw new Error('Invalid API key.')
-          }
-          throw new Error(`HTTP ${resp.status}: ${body.slice(0, 200)}`)
-        }
-        const data = await resp.json()
-        setAiStatus('ok')
-        setAiError(`Connected to ${data.displayName || form.geminiModel}. Input token limit: ${data.inputTokenLimit?.toLocaleString() || 'unknown'}.`)
-      } else {
-        // Test Ollama
-        const url = form.ollamaUrl || 'http://127.0.0.1:11434'
-        const resp = await fetch(`${url}/api/tags`, { method: 'GET' })
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-        const data = await resp.json()
-        const models: string[] = (data.models || []).map((m: any) => m.name)
-        const hasModel = models.some((n) => n.startsWith(form.ollamaModel))
-        if (hasModel) {
-          setAiStatus('ok')
-          setAiError(`Connected. Found model "${form.ollamaModel}" among ${models.length} model(s).`)
-        } else {
-          setAiStatus('fail')
-          setAiError(`Connected but model "${form.ollamaModel}" not found. Available: ${models.join(', ') || 'none'}. Run: ollama pull ${form.ollamaModel}`)
-        }
-      }
-    } catch (err) {
-      setAiStatus('fail')
-      setAiError(String(err instanceof Error ? err.message : err))
-    }
-  }, [form.aiProvider, form.groqApiKey, form.groqModel, form.geminiApiKey, form.geminiModel, form.ollamaUrl, form.ollamaModel])
 
   // Export data
   const handleExport = useCallback(async () => {
@@ -633,146 +559,17 @@ export function SettingsPage() {
         </div>
       </section>
 
-      {/* ── AI Configuration ─────────────────────────────────── */}
+      {/* ── Admin Controls ────────────────────────────────────── */}
       <section className="card settings-section">
-        <h3 className="settings-section-title">AI Configuration</h3>
-        <div className="settings-grid" style={{ marginBottom: 20 }}>
-          <div className="settings-field">
-            <label className="label">Provider</label>
-            <div className="settings-theme-toggle">
-              <button
-                className={`btn-pill ${form.aiProvider === 'groq' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => set('aiProvider', 'groq')}
-              >
-                Groq
-              </button>
-              <button
-                className={`btn-pill ${form.aiProvider === 'gemini' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => set('aiProvider', 'gemini')}
-              >
-                Gemini
-              </button>
-              <button
-                className={`btn-pill ${form.aiProvider === 'ollama' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => set('aiProvider', 'ollama')}
-              >
-                Ollama
-              </button>
-            </div>
-            <span className="settings-hint">
-              {form.aiProvider === 'groq'
-                ? 'Free, very fast. 30 req/min. Requires API key from console.groq.com'
-                : form.aiProvider === 'gemini'
-                  ? 'Free, fast, cloud-based. May not be available in all regions.'
-                  : 'Local, private, requires GPU. Slower on consumer hardware.'}
-            </span>
-          </div>
-        </div>
-
-        {form.aiProvider === 'groq' && (
-          <div className="settings-grid">
-            <div className="settings-field">
-              <label className="label">API Key</label>
-              <input
-                type="password"
-                placeholder="gsk_..."
-                value={form.groqApiKey}
-                onChange={(e) => set('groqApiKey', e.target.value)}
-              />
-              <span className="settings-hint">
-                Get a free key at{' '}
-                <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>
-                  console.groq.com/keys
-                </a>
-              </span>
-            </div>
-            <div className="settings-field">
-              <label className="label">Model</label>
-              <select
-                value={form.groqModel}
-                onChange={(e) => set('groqModel', e.target.value)}
-              >
-                <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout 17B (Recommended)</option>
-                <option value="meta-llama/llama-4-maverick-17b-128e-instruct">Llama 4 Maverick 17B</option>
-                <option value="llama-3.2-90b-vision-preview">Llama 3.2 90B Vision</option>
-                <option value="llama-3.2-11b-vision-preview">Llama 3.2 11B Vision (Fastest)</option>
-              </select>
-            </div>
-          </div>
-        )}
-
-        {form.aiProvider === 'gemini' && (
-          <div className="settings-grid">
-            <div className="settings-field">
-              <label className="label">API Key</label>
-              <input
-                type="password"
-                placeholder="AIza..."
-                value={form.geminiApiKey}
-                onChange={(e) => set('geminiApiKey', e.target.value)}
-              />
-              <span className="settings-hint">
-                Get a free key at{' '}
-                <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>
-                  aistudio.google.com/apikey
-                </a>
-              </span>
-            </div>
-            <div className="settings-field">
-              <label className="label">Model</label>
-              <select
-                value={form.geminiModel}
-                onChange={(e) => set('geminiModel', e.target.value)}
-              >
-                <option value="gemini-2.0-flash">Gemini 2.0 Flash (Recommended)</option>
-                <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Faster)</option>
-              </select>
-            </div>
-          </div>
-        )}
-
-        {form.aiProvider === 'ollama' && (
-          <div className="settings-grid">
-            <div className="settings-field">
-              <label className="label">Ollama URL</label>
-              <input
-                type="text"
-                placeholder="http://127.0.0.1:11434"
-                value={form.ollamaUrl}
-                onChange={(e) => set('ollamaUrl', e.target.value)}
-              />
-            </div>
-            <div className="settings-field">
-              <label className="label">Vision Model</label>
-              <input
-                type="text"
-                placeholder="llava-llama3"
-                value={form.ollamaModel}
-                onChange={(e) => set('ollamaModel', e.target.value)}
-              />
-              <span className="settings-hint">e.g. llava-llama3, llava:7b, llava-phi3</span>
-            </div>
-            <div className="settings-field">
-              <label className="label">Timeout (seconds)</label>
-              <input
-                type="number"
-                min={10}
-                max={600}
-                step={10}
-                value={form.ollamaTimeoutSecs}
-                onChange={(e) => set('ollamaTimeoutSecs', parseInt(e.target.value) || 180)}
-              />
-              <span className="settings-hint">180s recommended for GTX 1660 Ti + llava-llama3.</span>
-            </div>
-          </div>
-        )}
-
-        <div className="settings-ai-test">
-          <button className="btn-pill btn-secondary" onClick={testAi} disabled={aiStatus === 'testing'}>
-            {aiStatus === 'testing' ? 'Testing...' : 'Test Connection'}
+        <h3 className="settings-section-title">Admin Controls</h3>
+        <p className="muted">
+          AI provider keys/models are now hidden from end users and moved to the Admin page.
+          Enable admin mode by setting <code>localStorage.journal_admin_mode = "1"</code>, then refresh.
+        </p>
+        <div style={{ marginTop: 12 }}>
+          <button className="btn-pill btn-secondary" onClick={() => navigate('/admin')}>
+            Open Admin Panel
           </button>
-          {aiStatus === 'ok' && <span className="settings-ai-ok">{aiError}</span>}
-          {aiStatus === 'fail' && <span className="settings-ai-fail">{aiError}</span>}
         </div>
       </section>
 

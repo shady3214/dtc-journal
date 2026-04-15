@@ -1498,7 +1498,7 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
 
 .table-btn:hover {
   border-color: var(--border-hi);
-  background: rgba(16, 26, 20, 0.8);
+  background: rgba(18, 18, 18, 0.9);
   box-shadow: 0 0 20px var(--accent-glow);
 }
 
@@ -1974,10 +1974,11 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
 
 .trade-row-chart {
   width: 100%;
-  max-height: 80px;
+  height: 100%;
   object-fit: cover;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  object-position: center;
+  border: none;
+  border-radius: 0;
 }
 
 .trade-row-notes {
@@ -2102,6 +2103,12 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
 
 .trade-chart-wrapper {
   position: relative;
+  margin-top: 2px;
+  aspect-ratio: 4 / 3;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
 }
 
 .chart-popout-btn {
@@ -2148,7 +2155,7 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
   text-decoration: none;
   border: 1px solid var(--border-hi);
   border-radius: 8px;
-  margin-top: 8px;
+  margin-top: 0;
   background: var(--accent-glow);
   transition: background 0.15s ease, border-color 0.15s ease;
 }
@@ -2156,6 +2163,14 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
 .chart-link-card:hover {
   background: var(--accent-glow-strong);
   border-color: var(--accent);
+}
+
+.trade-tag-suggestions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 8px;
 }
 
 .chart-link-card-icon {
@@ -4442,6 +4457,67 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
   background: var(--accent);
   border-radius: 999px;
   transition: width 0.3s ease;
+}
+
+/* ── Forced update modal ────────────────────────────────────── */
+.force-update-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(0, 0, 0, 0.7);
+  display: grid;
+  place-items: center;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.force-update-modal {
+  width: min(560px, calc(100vw - 32px));
+  background: var(--surface-solid);
+  border: 1px solid var(--border-hi);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+}
+
+.force-update-title {
+  margin: 0 0 10px;
+  color: var(--text-bright);
+}
+
+.force-update-text {
+  margin: 0 0 14px;
+  color: var(--text);
+}
+
+.force-update-notes {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--surface-2);
+  max-height: 170px;
+  overflow: auto;
+}
+
+.force-update-notes p {
+  margin-top: 8px;
+  white-space: pre-wrap;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.force-update-error {
+  margin: 0 0 12px;
+  color: var(--negative);
+  font-size: 12px;
+}
+
+.force-update-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 /* ── Notifications / Alerts Section ────────────────────────── */

@@ -79,9 +79,8 @@ export async function loadSettingsAsync(): Promise<AppSettings> {
 }
 
 function applySettingsMigrations(parsed: AppSettings): AppSettings {
-  if ((parsed.theme as string) === 'dark' || (parsed.theme as string) === 'light') {
-    parsed.theme = 'obsidian'
-  }
+  const theme = parsed.theme as string
+  if (theme !== 'amoled' && theme !== 'white') parsed.theme = 'amoled'
   if (!parsed.accounts || !Array.isArray(parsed.accounts) || parsed.accounts.length === 0) {
     parsed.accounts = [{ ...DEFAULT_ACCOUNT, capital: parsed.startingCapital || parsed.defaultCapital || 1000 }]
     parsed.activeAccountId = DEFAULT_ACCOUNT_ID
@@ -182,7 +181,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   notifyNyOpen: true,
   notifyLondonOpen: false,
   notifyNyOpenMinutesBefore: 15,
-  theme: 'obsidian' as ThemeName,
+  theme: 'amoled' as ThemeName,
 }
 
 export function loadSettings(): AppSettings {
@@ -191,8 +190,9 @@ export function loadSettings(): AppSettings {
     if (!raw) return { ...DEFAULT_SETTINGS, accounts: [{ ...DEFAULT_ACCOUNT }] }
     const parsed = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
     // Migrate legacy theme values
-  if ((parsed.theme as string) === 'dark' || (parsed.theme as string) === 'light') {
-      parsed.theme = 'obsidian'
+    const theme = parsed.theme as string
+    if (theme !== 'amoled' && theme !== 'white') {
+      parsed.theme = 'amoled'
     }
     // Migrate: ensure accounts array exists
     if (!parsed.accounts || !Array.isArray(parsed.accounts) || parsed.accounts.length === 0) {

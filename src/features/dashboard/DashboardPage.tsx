@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { createChart, ColorType, AreaSeries, type IChartApi } from 'lightweight-charts'
 import { getApi } from '../../shared/lib/api'
 import { useNavigate } from 'react-router-dom'
@@ -396,7 +397,13 @@ function ChartLightbox({
     return () => window.removeEventListener('keydown', handler)
   }, [onClose, onPrev, onNext, canPrev, canNext])
 
-  return (
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prevOverflow }
+  }, [])
+
+  return createPortal(
     <div className="lightbox-overlay" onClick={onClose}>
       <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
         <button className="lightbox-close" onClick={onClose}>&times;</button>
@@ -409,7 +416,8 @@ function ChartLightbox({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 

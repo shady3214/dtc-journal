@@ -7,6 +7,7 @@ import { SettingsPage } from '../features/settings/SettingsPage'
 import { JournalPage } from '../features/journal/JournalPage'
 import { NewsCalendarPage } from '../features/news-calendar/NewsCalendarPage'
 import { ToolsPage } from '../features/tools/ToolsPage'
+import { AdminPage } from '../features/admin/AdminPage'
 import { LoginPage } from '../features/auth/LoginPage'
 import { useAuth } from '../shared/contexts/AuthContext'
 
@@ -77,6 +78,7 @@ export const router = createBrowserRouter([
           { path: 'journal', element: <JournalPage /> },
           { path: 'news-calendar', element: <NewsCalendarPage /> },
           { path: 'tools', element: <ToolsPage /> },
+          { path: 'admin', element: <AdminPage /> },
           { path: 'settings', element: <SettingsPage /> },
         ],
       },

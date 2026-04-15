@@ -81,7 +81,7 @@ export interface JournalAiFeedback {
   createdAt: string
 }
 
-export type ThemeName = 'obsidian' | 'midnight' | 'phantom' | 'white' | 'amoled'
+export type ThemeName = 'white' | 'amoled'
 
 export interface TradingAccount {
   id: string

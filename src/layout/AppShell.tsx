@@ -8,9 +8,6 @@ import type { ThemeName } from '../shared/types/domain'
 import { notificationScheduler, requestNotificationPermission } from '../shared/lib/notificationScheduler'
 
 const THEMES: { id: ThemeName; color: string; label: string }[] = [
-  { id: 'obsidian', color: '#22c55e', label: 'Obsidian' },
-  { id: 'midnight', color: '#639bff', label: 'Midnight' },
-  { id: 'phantom', color: '#c084fc', label: 'Phantom' },
   { id: 'white',   color: '#3b7ef5', label: 'White'    },
   { id: 'amoled',  color: '#00e5ff', label: 'AMOLED'   },
 ]
@@ -100,12 +97,21 @@ function NavIcon({ name }: { name: string }) {
           <line x1="17" y1="16" x2="23" y2="16" />
         </svg>
       )
+    case 'admin':
+      return (
+        <svg {...p}>
+          <path d="M12 3l7 3v6c0 5-3.5 8-7 9-3.5-1-7-4-7-9V6l7-3z" />
+          <path d="M9.5 12.5l1.7 1.7 3.3-3.3" />
+        </svg>
+      )
     default:
       return null
   }
 }
 
 export function AppShell() {
+  const adminMode = localStorage.getItem('journal_admin_mode') === '1'
+  const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
   const location = useLocation()
   const { user, signOut, configured } = useAuth()
   const { accounts, activeAccount, switchAccount } = useAccount()
@@ -115,11 +121,17 @@ export function AppShell() {
   const [theme, setTheme] = useState<ThemeName>(() => {
     const s = loadSettings()
     const saved = s.theme
-    return saved && VALID_THEMES.has(saved) ? saved : 'obsidian'
+    return saved && VALID_THEMES.has(saved) ? saved : 'amoled'
   })
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     return localStorage.getItem('sidebar-open') !== 'false'
   })
+  const [forceUpdateOpen, setForceUpdateOpen] = useState(false)
+  const [forceUpdateVersion, setForceUpdateVersion] = useState('')
+  const [forceUpdateNotes, setForceUpdateNotes] = useState('')
+  const [forceUpdateStatus, setForceUpdateStatus] = useState<'idle' | 'downloading' | 'error'>('idle')
+  const [forceUpdateError, setForceUpdateError] = useState('')
+  const [forcedUpdate, setForcedUpdate] = useState<any>(null)
 
   // Apply theme
   useEffect(() => {
@@ -132,7 +144,7 @@ export function AppShell() {
     const s = loadSettings()
     setDisplayName(s.displayName || '')
     const saved = s.theme
-    setTheme(saved && VALID_THEMES.has(saved) ? saved : 'obsidian')
+    setTheme(saved && VALID_THEMES.has(saved) ? saved : 'amoled')
   }, [location.pathname, activeAccount.id, accounts.length])
 
   // Persist sidebar state
@@ -161,6 +173,51 @@ export function AppShell() {
     return () => notificationScheduler.stop()
   }, [])
 
+  // Force-update gate: check on app launch and block usage when a newer release exists.
+  useEffect(() => {
+    if (!isTauri) return
+    let active = true
+    ;(async () => {
+      try {
+        const { check } = await import('@tauri-apps/plugin-updater')
+        const update = await check()
+        if (!active || !update?.available) return
+        setForcedUpdate(update)
+        setForceUpdateVersion(update.version)
+        setForceUpdateNotes(update.body || '')
+        setForceUpdateError('')
+        setForceUpdateStatus('idle')
+        setForceUpdateOpen(true)
+      } catch {
+        // Silent fail: manual updater in Settings remains available.
+      }
+    })()
+    return () => { active = false }
+  }, [isTauri])
+
+  const installForcedUpdate = useCallback(async () => {
+    if (!forcedUpdate) return
+    setForceUpdateStatus('downloading')
+    setForceUpdateError('')
+    try {
+      await forcedUpdate.downloadAndInstall()
+      window.location.reload()
+    } catch (err) {
+      setForceUpdateStatus('error')
+      setForceUpdateError(String(err instanceof Error ? err.message : err))
+    }
+  }, [forcedUpdate])
+
+  const exitForForcedUpdate = useCallback(async () => {
+    if (!isTauri) return
+    try {
+      const { exit } = await import('@tauri-apps/plugin-process')
+      await exit(0)
+    } catch {
+      // Keep modal open if exit fails.
+    }
+  }, [isTauri])
+
   const switchTheme = useCallback((id: ThemeName) => {
     setTheme(id)
     const settings = loadSettings()
@@ -174,6 +231,10 @@ export function AppShell() {
     const next = THEMES[(idx + 1) % THEMES.length]
     switchTheme(next.id)
   }, [theme, switchTheme])
+
+  const effectiveNavItems = adminMode
+    ? [...navItems.slice(0, navItems.length - 1), { to: '/admin', label: 'Admin', icon: 'admin' }, navItems[navItems.length - 1]]
+    : navItems
 
   return (
     <div className={`app-shell ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
@@ -289,7 +350,7 @@ export function AppShell() {
         {sidebarOpen && <p className="sidebar-label">Navigation</p>}
 
         <nav>
-          {navItems.map((item) => (
+          {effectiveNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -382,6 +443,34 @@ export function AppShell() {
           </div>
         </section>
       </main>
+
+      {forceUpdateOpen && (
+        <div className="force-update-backdrop" role="dialog" aria-modal="true" aria-label="App update required">
+          <div className="force-update-modal">
+            <h3 className="force-update-title">Update Required</h3>
+            <p className="force-update-text">
+              A newer version (v{forceUpdateVersion}) is available. Update now to continue using the app.
+            </p>
+            {forceUpdateNotes && (
+              <div className="force-update-notes">
+                <strong>Release notes</strong>
+                <p>{forceUpdateNotes}</p>
+              </div>
+            )}
+            {forceUpdateStatus === 'error' && (
+              <p className="force-update-error">Update failed: {forceUpdateError}</p>
+            )}
+            <div className="force-update-actions">
+              <button className="btn-pill btn-primary" onClick={installForcedUpdate} disabled={forceUpdateStatus === 'downloading'}>
+                {forceUpdateStatus === 'downloading' ? 'Updating…' : 'Update Now'}
+              </button>
+              <button className="btn-pill btn-secondary" onClick={exitForForcedUpdate} disabled={forceUpdateStatus === 'downloading'}>
+                Close App
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
