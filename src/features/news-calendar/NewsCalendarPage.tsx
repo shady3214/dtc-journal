@@ -183,7 +183,7 @@ function DayModal({
 export function NewsCalendarPage() {
   const { refreshKey } = useAccount()
   const [tab, setTab] = useState<TabMode>('events')
-  const [month, setMonth] = useState(() => {
+  const [month] = useState(() => {
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth(), 1)
   })
