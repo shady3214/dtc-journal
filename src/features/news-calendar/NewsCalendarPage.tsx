@@ -237,12 +237,8 @@ export function NewsCalendarPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventsQuery.data])
 
-  const atMin = month <= minMonth
-  const atMax = month >= maxMonth
   const outsideRange = month < minMonth || month > maxMonth
 
-  const prevMonth = () => { if (!atMin) setMonth(new Date(year, mon - 1, 1)) }
-  const nextMonth = () => { if (!atMax) setMonth(new Date(year, mon + 1, 1)) }
 
   // Build calendar grid cells
   const daysInMonth = new Date(year, mon + 1, 0).getDate()
