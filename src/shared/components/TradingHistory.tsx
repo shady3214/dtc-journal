@@ -34,6 +34,7 @@ export function TradingHistory({ trades }: { trades: Trade[] }) {
             </thead>
             <tbody>
               {sorted.map((t) => {
+                const isDirectPnl = t.lotSize === 0 && t.entry === 0 && t.stopLoss === 0 && t.takeProfit === 0
                 const commission = t.enableCommission ? t.commissionPerLot * t.lotSize : 0
                 const isWin = t.pnl > 0
                 return (
@@ -48,12 +49,12 @@ export function TradingHistory({ trades }: { trades: Trade[] }) {
                     <td className={isWin ? 'positive' : 'negative'}>
                       ${t.pnl.toFixed(2)}
                     </td>
-                    <td>{t.lotSize.toFixed(2)}</td>
-                    <td>${commission.toFixed(2)}</td>
-                    <td>{t.entry}</td>
-                    <td>{t.stopLoss}</td>
-                    <td>{t.takeProfit}</td>
-                    <td>{t.riskPercent}%</td>
+                    <td>{isDirectPnl ? <span className="hist-na">—</span> : t.lotSize.toFixed(2)}</td>
+                    <td>{isDirectPnl ? <span className="hist-na">—</span> : `$${commission.toFixed(2)}`}</td>
+                    <td>{isDirectPnl ? <span className="hist-na">—</span> : t.entry}</td>
+                    <td>{isDirectPnl ? <span className="hist-na">—</span> : t.stopLoss}</td>
+                    <td>{isDirectPnl ? <span className="hist-na">—</span> : t.takeProfit}</td>
+                    <td>{isDirectPnl ? <span className="hist-na">—</span> : `${t.riskPercent}%`}</td>
                     <td>
                       <span className={`result-badge ${isWin ? 'win' : 'loss'}`}>
                         {isWin ? '100%' : '0%'}

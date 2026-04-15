@@ -17,6 +17,7 @@ export interface Trade {
   mistakes: string[]
   setup?: string
   chartImageData?: string
+  chartScreenshots?: string[]
   chartLink?: string
   notesHtml: string
   openedAt: string
@@ -61,6 +62,7 @@ export interface JournalEntry {
   preSession: string
   preLevels: string
   prePlan: string
+  preScreenshots?: string[]        // bias/chart screenshots for pre-session plan
   postWentWell: string
   postWentWrong: string
   postLessons: string
@@ -79,7 +81,7 @@ export interface JournalAiFeedback {
   createdAt: string
 }
 
-export type ThemeName = 'obsidian' | 'midnight' | 'ember' | 'crimson' | 'phantom' | 'white' | 'amoled'
+export type ThemeName = 'obsidian' | 'midnight' | 'phantom' | 'white' | 'amoled'
 
 export interface TradingAccount {
   id: string
@@ -87,6 +89,12 @@ export interface TradingAccount {
   capital: number
   description?: string
   createdAt: string
+  // Prop firm mode
+  isPropFirm?: boolean
+  propMaxDrawdown?: number      // max total loss allowed ($)
+  propDailyLoss?: number        // max loss in one calendar day ($)
+  propProfitTarget?: number     // profit target ($)
+  propConsistencyRule?: number  // max % any single day can be of total profit (e.g. 40)
 }
 
 export interface AppSettings {

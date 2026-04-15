@@ -9,7 +9,7 @@ interface AccountState {
   activeAccount: TradingAccount
   switchAccount: (id: string) => void
   addAccount: (name: string, capital: number, description?: string) => TradingAccount
-  updateAccount: (id: string, updates: Partial<Pick<TradingAccount, 'name' | 'capital' | 'description'>>) => void
+  updateAccount: (id: string, updates: Partial<Omit<TradingAccount, 'id' | 'createdAt'>>) => void
   deleteAccount: (id: string) => void
   /** Incremented on switch so pages can re-fetch data */
   refreshKey: number
@@ -67,13 +67,11 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     return newAcct
   }, [persist])
 
-  const updateAccount = useCallback((id: string, updates: Partial<Pick<TradingAccount, 'name' | 'capital' | 'description'>>) => {
+  const updateAccount = useCallback((id: string, updates: Partial<Omit<TradingAccount, 'id' | 'createdAt'>>) => {
     const s = loadSettings()
     const acct = s.accounts.find((a) => a.id === id)
     if (acct) {
-      if (updates.name !== undefined) acct.name = updates.name
-      if (updates.capital !== undefined) acct.capital = updates.capital
-      if (updates.description !== undefined) acct.description = updates.description
+      Object.assign(acct, updates)
       void persist(s)
     }
   }, [persist])

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { AiAnalysis, Trade } from '../../shared/types/domain'
@@ -12,6 +12,8 @@ const MISTAKE_CATEGORIES = [
   'Chased Entry', 'Early Exit', 'Held Too Long', 'Wrong Session',
   'Emotional', 'Ignored Rules', 'Poor R:R',
 ]
+
+const MAX_SCREENSHOTS = 5
 
 function makeEmptyTrade(capitalOverride?: number): Trade {
   const settings = loadSettings()
@@ -34,6 +36,7 @@ function makeEmptyTrade(capitalOverride?: number): Trade {
     mistakes: [],
     setup: '',
     chartImageData: '',
+    chartScreenshots: [],
     chartLink: '',
     notesHtml: '',
     openedAt: new Date().toISOString(),
@@ -81,12 +84,16 @@ export function TradesPage() {
 
   const activeCapital = activeAccount?.capital
 
-  const [form, setForm] = useState<Trade>(() =>
-    editTrade
-      ? { ...editTrade, mistakes: editTrade.mistakes || [], chartLink: editTrade.chartLink || '' }
-      : makeEmptyTrade(activeCapital)
-  )
-  const [preview, setPreview] = useState('')
+  const [form, setForm] = useState<Trade>(() => {
+    if (editTrade) {
+      const screenshots = editTrade.chartScreenshots?.length
+        ? editTrade.chartScreenshots
+        : (editTrade.chartImageData ? [editTrade.chartImageData] : [])
+      return { ...editTrade, mistakes: editTrade.mistakes || [], chartLink: editTrade.chartLink || '', chartScreenshots: screenshots }
+    }
+    return makeEmptyTrade(activeCapital)
+  })
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
   const [notice, setNotice] = useState('')
   const [ai, setAi] = useState<AiAnalysis | null>(null)
   const [aiError, setAiError] = useState('')
@@ -97,6 +104,10 @@ export function TradesPage() {
   const [symbolType, setSymbolType] = useState('')
   const [directPnl, setDirectPnl] = useState(() => loadSettings().defaultDirectPnl ?? false)
   const [directPnlValue, setDirectPnlValue] = useState('')
+  const lastPastedFingerprintRef = useRef<string>('')
+  const lastPastedAtRef = useRef<number>(0)
+  const lastAddedScreenshotRef = useRef<string>('')
+  const lastAddedAtRef = useRef<number>(0)
   const isEditing = !!form.id
 
   // Decimal precision for price inputs based on current pair
@@ -106,8 +117,11 @@ export function TradesPage() {
   // If navigated here with a trade to edit, populate the form
   useEffect(() => {
     if (editTrade) {
-      setForm({ ...editTrade, mistakes: editTrade.mistakes || [], chartLink: editTrade.chartLink || '' })
-      setPreview('')
+      const screenshots = editTrade.chartScreenshots?.length
+        ? editTrade.chartScreenshots
+        : (editTrade.chartImageData ? [editTrade.chartImageData] : [])
+      setForm({ ...editTrade, mistakes: editTrade.mistakes || [], chartLink: editTrade.chartLink || '', chartScreenshots: screenshots })
+      setLightboxIdx(null)
       setAi(editTrade.aiAnalysis || null)
       setAiError('')
       setTagInput('')
@@ -224,7 +238,7 @@ export function TradesPage() {
 
   const resetForm = () => {
     setForm({ ...makeEmptyTrade(activeCapital), openedAt: new Date().toISOString() })
-    setPreview('')
+    setLightboxIdx(null)
     setAi(null)
     setAiError('')
     setTagInput('')
@@ -233,25 +247,18 @@ export function TradesPage() {
   }
 
   const tradeToSave = (): Trade => {
-    if (directPnl) {
-      return {
-        ...form,
-        id: form.id || crypto.randomUUID(),
-        lotSize: 0,
-        pnl: calc.pnl,
-        returnPercent: calc.returnPercent,
-        entry: 0,
-        stopLoss: 0,
-        takeProfit: 0,
-      }
-    }
-    return {
+    const screenshots = form.chartScreenshots ?? []
+    const primaryImage = screenshots[0] || form.chartImageData || ''
+    const base = {
       ...form,
       id: form.id || crypto.randomUUID(),
-      lotSize: calc.lotSize,
-      pnl: calc.pnl,
-      returnPercent: calc.returnPercent,
+      chartImageData: primaryImage,
+      chartScreenshots: screenshots,
     }
+    if (directPnl) {
+      return { ...base, lotSize: 0, pnl: calc.pnl, returnPercent: calc.returnPercent, entry: 0, stopLoss: 0, takeProfit: 0 }
+    }
+    return { ...base, lotSize: calc.lotSize, pnl: calc.pnl, returnPercent: calc.returnPercent }
   }
 
   const save = useMutation({
@@ -296,14 +303,85 @@ export function TradesPage() {
     },
   })
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]
-    if (!f) return
-    setPreview(URL.createObjectURL(f))
-    const reader = new FileReader()
-    reader.onload = () => setForm((p) => ({ ...p, chartImageData: String(reader.result || '') }))
-    reader.readAsDataURL(f)
+  const addScreenshotFile = useCallback((file: File) => {
+    setForm((prev) => {
+      const current = prev.chartScreenshots ?? []
+      if (current.length >= MAX_SCREENSHOTS) return prev
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = String(reader.result || '')
+        setForm((p) => {
+          const shots = p.chartScreenshots ?? []
+          if (shots.length >= MAX_SCREENSHOTS) return p
+          const now = Date.now()
+          const isImmediateDuplicate =
+            dataUrl &&
+            dataUrl === lastAddedScreenshotRef.current &&
+            now - lastAddedAtRef.current < 1200
+          if (isImmediateDuplicate) return p
+          if (shots.includes(dataUrl)) return p
+          lastAddedScreenshotRef.current = dataUrl
+          lastAddedAtRef.current = now
+          return { ...p, chartScreenshots: [...shots, dataUrl] }
+        })
+      }
+      reader.readAsDataURL(file)
+      return prev
+    })
+  }, [])
+
+  const removeScreenshot = (idx: number) => {
+    setForm((p) => {
+      const shots = (p.chartScreenshots ?? []).filter((_, i) => i !== idx)
+      return { ...p, chartScreenshots: shots }
+    })
+    setLightboxIdx(null)
   }
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    files.forEach(addScreenshotFile)
+    e.target.value = ''
+  }
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'))
+    files.forEach(addScreenshotFile)
+  }
+
+  // Global paste listener — captures Ctrl+V anywhere on the form when images are on clipboard
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const items = Array.from(e.clipboardData?.items ?? [])
+      const imageItems = items.filter((i) => i.type.startsWith('image/'))
+      if (imageItems.length === 0) return
+      e.preventDefault()
+
+      // Some clipboards expose multiple image variants for one paste action.
+      // Keep only the first image item to avoid duplicate screenshots.
+      const file = imageItems[0].getAsFile()
+      if (!file) return
+
+      const fingerprint = `${file.type}:${file.size}:${file.lastModified}`
+      const now = Date.now()
+      if (now - lastPastedAtRef.current < 300) {
+        return
+      }
+      if (
+        fingerprint === lastPastedFingerprintRef.current &&
+        now - lastPastedAtRef.current < 1000
+      ) {
+        return
+      }
+
+      lastPastedFingerprintRef.current = fingerprint
+      lastPastedAtRef.current = now
+      addScreenshotFile(file)
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [addScreenshotFile])
 
   // ── Render ─────────────────────────────────────────────────
 
@@ -580,22 +658,81 @@ export function TradesPage() {
         )}
       </div>
 
-      {/* Chart upload */}
+      {/* Chart screenshots */}
       <div className="field field-wide" style={{ marginTop: 12 }}>
-        <span>Upload Chart Screenshot</span>
-        <input type="file" accept="image/*" onChange={handleFileUpload} />
+        <div className="screenshots-header">
+          <span>Chart Screenshots</span>
+          <span className="screenshots-count muted">
+            {(form.chartScreenshots?.length ?? 0)}/{MAX_SCREENSHOTS}
+          </span>
+        </div>
+
+        {(form.chartScreenshots?.length ?? 0) < MAX_SCREENSHOTS && (
+          <div
+            className="screenshot-dropzone"
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
+            onClick={() => document.getElementById('screenshot-file-input')?.click()}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+            <span>Click to upload, drag &amp; drop, or <kbd>Ctrl+V</kbd> to paste</span>
+            <span className="muted" style={{ fontSize: '0.78rem' }}>PNG, JPG, WebP — up to {MAX_SCREENSHOTS} screenshots</span>
+          </div>
+        )}
+
+        <input
+          id="screenshot-file-input"
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleFileUpload}
+        />
+
+        {(form.chartScreenshots?.length ?? 0) > 0 && (
+          <div className="screenshot-thumbnails">
+            {form.chartScreenshots!.map((src, idx) => (
+              <div
+                key={idx}
+                className="screenshot-thumb"
+                onClick={() => setLightboxIdx(idx)}
+              >
+                <img src={src} alt={`Screenshot ${idx + 1}`} />
+                <button
+                  type="button"
+                  className="screenshot-remove"
+                  onClick={(e) => { e.stopPropagation(); removeScreenshot(idx) }}
+                  title="Remove"
+                >
+                  &times;
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {preview && <img src={preview} className="chart-preview-img" alt="Chart preview" />}
-      {form.chartImageData && !preview && (
-        <img src={form.chartImageData} className="chart-preview-img" alt="Saved chart" />
+      {/* Lightbox */}
+      {lightboxIdx !== null && form.chartScreenshots?.[lightboxIdx] && (
+        <div className="screenshot-lightbox" onClick={() => setLightboxIdx(null)}>
+          <div className="screenshot-lightbox-inner" onClick={(e) => e.stopPropagation()}>
+            <img src={form.chartScreenshots[lightboxIdx]} alt={`Screenshot ${lightboxIdx + 1}`} />
+            <div className="screenshot-lightbox-actions">
+              <button type="button" onClick={() => setLightboxIdx((i) => i !== null && i > 0 ? i - 1 : i)} disabled={lightboxIdx === 0}>‹ Prev</button>
+              <span className="muted">{lightboxIdx + 1} / {form.chartScreenshots.length}</span>
+              <button type="button" onClick={() => setLightboxIdx((i) => i !== null && i < form.chartScreenshots!.length - 1 ? i + 1 : i)} disabled={lightboxIdx === form.chartScreenshots.length - 1}>Next ›</button>
+              <button type="button" className="danger" onClick={() => removeScreenshot(lightboxIdx)}>Delete</button>
+              <button type="button" onClick={() => setLightboxIdx(null)}>Close</button>
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="actions-row">
         <button onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? 'Saving...' : 'Save Trade'}
         </button>
-        <button onClick={() => analyze.mutate()} disabled={!form.chartImageData || analyze.isPending}>
+        <button onClick={() => analyze.mutate()} disabled={!(form.chartScreenshots?.length || form.chartImageData) || analyze.isPending}>
           {analyze.isPending ? `Analyzing... (${aiElapsed}s)` : 'Analyze with AI'}
         </button>
         <button onClick={resetForm}>Clear</button>

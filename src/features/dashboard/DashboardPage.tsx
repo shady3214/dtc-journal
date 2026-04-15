@@ -9,6 +9,22 @@ import { TradingHistory } from '../../shared/components/TradingHistory'
 import { TradingCalendar } from '../../shared/components/TradingCalendar'
 import { useAccount } from '../../shared/contexts/AccountContext'
 
+function getTradeChartImages(chartImageData?: string, chartScreenshots?: string[]): string[] {
+  if (chartScreenshots && chartScreenshots.length > 0) return chartScreenshots
+  if (!chartImageData) return []
+  if (chartImageData.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(chartImageData)
+      if (Array.isArray(parsed)) {
+        return parsed.filter((img): img is string => typeof img === 'string' && img.length > 0)
+      }
+    } catch {
+      // Fallback to legacy single-image format.
+    }
+  }
+  return [chartImageData]
+}
+
 function EquityCurve({
   data,
   capital,
@@ -169,26 +185,229 @@ function EquityCurve({
           No equity data yet. Add some trades to see your curve.
         </p>
       ) : (
-        <div ref={containerRef} />
+        <>
+          <div ref={containerRef} />
+          {data.length > 0 && (() => {
+            const sorted = [...data].sort((a, b) => a.date.localeCompare(b.date))
+            const from = new Date(sorted[0].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+            const to = new Date(sorted[sorted.length - 1].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+            return (
+              <p className="equity-range-caption">
+                {sorted.length === 1 ? `Data from ${from}` : `${from} — ${to} · ${sorted.length} trading day${sorted.length !== 1 ? 's' : ''}`}
+              </p>
+            )
+          })()}
+        </>
       )}
+    </div>
+  )
+}
+
+/* ── Prop Firm Panel ──────────────────────────────────────── */
+
+function PropFirmBar({
+  label,
+  used,
+  limit,
+  invert = false,
+  unit = '$',
+  suffix = '',
+}: {
+  label: string
+  used: number
+  limit: number
+  /** invert=true means higher used is better (profit target) */
+  invert?: boolean
+  unit?: string
+  suffix?: string
+}) {
+  if (!limit) return null
+  const pct = Math.min(Math.abs(used) / limit, 1)
+  const remaining = limit - Math.abs(used)
+  const color = invert
+    ? pct >= 0.9 ? 'var(--positive)' : pct >= 0.5 ? 'var(--accent)' : 'var(--muted)'
+    : pct >= 0.9 ? 'var(--negative)' : pct >= 0.6 ? '#f59e0b' : 'var(--positive)'
+
+  return (
+    <div className="pf-bar-row">
+      <div className="pf-bar-header">
+        <span className="pf-bar-label">{label}</span>
+        <span className="pf-bar-values" style={{ color }}>
+          {unit}{Math.abs(used).toFixed(2)}
+          <span className="muted"> / {unit}{limit.toLocaleString()}{suffix}</span>
+        </span>
+      </div>
+      <div className="pf-bar-track">
+        <div
+          className="pf-bar-fill"
+          style={{ width: `${pct * 100}%`, background: color }}
+        />
+      </div>
+      <div className="pf-bar-footer">
+        {invert ? (
+          <span className="muted" style={{ fontSize: 11 }}>
+            {unit}{remaining.toFixed(2)} to target
+          </span>
+        ) : (
+          <span className="muted" style={{ fontSize: 11 }}>
+            {unit}{Math.max(0, remaining).toFixed(2)} remaining
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PropFirmPanel({ trades, totalPnl, equityCurve, account }: {
+  trades: import('../../shared/types/domain').Trade[]
+  totalPnl: number
+  equityCurve: import('../../shared/types/domain').EquityPoint[]
+  account: import('../../shared/types/domain').TradingAccount
+}) {
+  const todayStr = new Date().toISOString().slice(0, 10)
+
+  // Today's net P&L
+  const todayPnl = trades
+    .filter((t) => t.openedAt.slice(0, 10) === todayStr)
+    .reduce((s, t) => s + t.pnl, 0)
+
+  // Max drawdown: peak-to-trough on equity curve
+  let peak = 0
+  let maxDd = 0
+  for (const pt of equityCurve) {
+    if (pt.value > peak) peak = pt.value
+    const dd = peak - pt.value
+    if (dd > maxDd) maxDd = dd
+  }
+
+  // Best single day P&L (absolute)
+  const byDay: Record<string, number> = {}
+  for (const t of trades) {
+    const d = t.openedAt.slice(0, 10)
+    byDay[d] = (byDay[d] ?? 0) + t.pnl
+  }
+  const bestDayPnl = Math.max(0, ...Object.values(byDay))
+  const bestDayPct = totalPnl > 0 ? (bestDayPnl / totalPnl) * 100 : 0
+
+  const hasDailyLoss = !!(account.propDailyLoss)
+  const hasMaxDD = !!(account.propMaxDrawdown)
+  const hasProfitTarget = !!(account.propProfitTarget)
+  const hasConsistency = !!(account.propConsistencyRule)
+
+  if (!hasDailyLoss && !hasMaxDD && !hasProfitTarget && !hasConsistency) return null
+
+  const consistencyOk = !hasConsistency || bestDayPct <= (account.propConsistencyRule ?? 100)
+
+  return (
+    <div className="card pf-panel">
+      <div className="pf-panel-header">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2" />
+          <path d="M8 21h8M12 17v4" />
+        </svg>
+        <h3>Prop Firm Tracker</h3>
+      </div>
+
+      <div className="pf-bars">
+        {hasDailyLoss && (
+          <PropFirmBar
+            label="Today's Loss"
+            used={Math.min(0, todayPnl) * -1}
+            limit={account.propDailyLoss!}
+          />
+        )}
+        {hasMaxDD && (
+          <PropFirmBar
+            label="Max Drawdown Used"
+            used={maxDd}
+            limit={account.propMaxDrawdown!}
+          />
+        )}
+        {hasProfitTarget && (
+          <PropFirmBar
+            label="Profit Target"
+            used={Math.max(0, totalPnl)}
+            limit={account.propProfitTarget!}
+            invert
+          />
+        )}
+        {hasConsistency && (
+          <div className="pf-bar-row">
+            <div className="pf-bar-header">
+              <span className="pf-bar-label">Consistency Rule</span>
+              <span className="pf-bar-values" style={{ color: consistencyOk ? 'var(--positive)' : 'var(--negative)' }}>
+                Best day: {bestDayPct.toFixed(1)}%
+                <span className="muted"> / {account.propConsistencyRule}% max</span>
+              </span>
+            </div>
+            <div className="pf-bar-track">
+              <div
+                className="pf-bar-fill"
+                style={{
+                  width: `${Math.min(bestDayPct / (account.propConsistencyRule ?? 100), 1) * 100}%`,
+                  background: consistencyOk ? 'var(--positive)' : 'var(--negative)',
+                }}
+              />
+            </div>
+            <div className="pf-bar-footer">
+              {consistencyOk ? (
+                <span className="muted" style={{ fontSize: 11 }}>Within consistency rule</span>
+              ) : (
+                <span style={{ color: 'var(--negative)', fontSize: 11 }}>
+                  ⚠ Best day exceeds {account.propConsistencyRule}% of total profit — consistency rule violated
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
 
 /* ── Chart Image Lightbox ─────────────────────────────────── */
 
-function ChartLightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+function ChartLightbox({
+  images,
+  index,
+  altBase,
+  onClose,
+  onPrev,
+  onNext,
+}: {
+  images: string[]
+  index: number
+  altBase: string
+  onClose: () => void
+  onPrev: () => void
+  onNext: () => void
+}) {
+  const src = images[index]
+  const canPrev = index > 0
+  const canNext = index < images.length - 1
+
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+      if (e.key === 'ArrowLeft' && canPrev) onPrev()
+      if (e.key === 'ArrowRight' && canNext) onNext()
+    }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  }, [onClose, onPrev, onNext, canPrev, canNext])
 
   return (
     <div className="lightbox-overlay" onClick={onClose}>
       <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
         <button className="lightbox-close" onClick={onClose}>&times;</button>
-        <img src={src} alt={alt} className="lightbox-img" />
+        <img src={src} alt={`${altBase} ${index + 1}`} className="lightbox-img" />
+        {images.length > 1 && (
+          <div className="lightbox-controls">
+            <button className="lightbox-nav-btn" onClick={onPrev} disabled={!canPrev}>Prev</button>
+            <span className="lightbox-counter">{index + 1} / {images.length}</span>
+            <button className="lightbox-nav-btn" onClick={onNext} disabled={!canNext}>Next</button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -285,7 +504,7 @@ export function DashboardPage() {
   const { refreshKey, activeAccount, updateAccount } = useAccount()
   const analytics = useQuery({ queryKey: ['analytics', refreshKey], queryFn: () => getApi().analytics() })
   const trades = useQuery({ queryKey: ['trades', refreshKey], queryFn: () => getApi().listTrades() })
-  const [lightboxImg, setLightboxImg] = useState<{ src: string; alt: string } | null>(null)
+  const [lightboxState, setLightboxState] = useState<{ images: string[]; index: number; altBase: string } | null>(null)
   const [aiModal, setAiModal] = useState<{ pair: string; analysis: AiAnalysis } | null>(null)
 
   const handleCapitalSave = useCallback((capital: number) => {
@@ -301,8 +520,19 @@ export function DashboardPage() {
 
   return (
     <>
-      {lightboxImg && (
-        <ChartLightbox src={lightboxImg.src} alt={lightboxImg.alt} onClose={() => setLightboxImg(null)} />
+      {lightboxState && (
+        <ChartLightbox
+          images={lightboxState.images}
+          index={lightboxState.index}
+          altBase={lightboxState.altBase}
+          onClose={() => setLightboxState(null)}
+          onPrev={() =>
+            setLightboxState((s) => (s ? { ...s, index: Math.max(0, s.index - 1) } : s))
+          }
+          onNext={() =>
+            setLightboxState((s) => (s ? { ...s, index: Math.min(s.images.length - 1, s.index + 1) } : s))
+          }
+        />
       )}
       {aiModal && (
         <AiModal pair={aiModal.pair} analysis={aiModal.analysis} onClose={() => setAiModal(null)} />
@@ -333,6 +563,16 @@ export function DashboardPage() {
 
       {/* Equity curve */}
       <EquityCurve data={analytics.data?.equityCurve ?? []} capital={activeAccount.capital} onSaveCapital={handleCapitalSave} />
+
+      {/* Prop firm tracker — only shown when account has isPropFirm enabled */}
+      {activeAccount.isPropFirm && (
+        <PropFirmPanel
+          trades={trades.data ?? []}
+          totalPnl={analytics.data?.totalPnl ?? 0}
+          equityCurve={analytics.data?.equityCurve ?? []}
+          account={activeAccount}
+        />
+      )}
 
       {/* Trading calendar */}
       <TradingCalendar trades={trades.data ?? []} />
@@ -365,6 +605,10 @@ export function DashboardPage() {
         <div className="table">
           {(trades.data ?? []).map((t) => (
             <div key={t.id} className="table-row-detail table-btn">
+              {(() => {
+                const chartImages = getTradeChartImages(t.chartImageData, t.chartScreenshots)
+                return (
+                  <>
               <div className="trade-row-main">
                 <div className="trade-row-info">
                   <span className="trade-pair">{t.pair}</span>
@@ -383,15 +627,15 @@ export function DashboardPage() {
                   ${t.pnl.toFixed(2)}
                 </span>
               </div>
-              {(t.chartImageData || t.chartLink) && (
+              {(chartImages.length > 0 || t.chartLink) && (
                 <div className="trade-chart-wrapper">
-                  {t.chartImageData ? (
+                  {chartImages.length > 0 ? (
                     <>
-                      <img src={t.chartImageData} className="trade-row-chart" alt={`${t.pair} chart`} />
+                      <img src={chartImages[0]} className="trade-row-chart" alt={`${t.pair} chart`} />
                       <button
                         className="chart-popout-btn"
                         title="View full chart"
-                        onClick={() => setLightboxImg({ src: t.chartImageData!, alt: `${t.pair} chart` })}
+                        onClick={() => setLightboxState({ images: chartImages, index: 0, altBase: `${t.pair} chart` })}
                       >
                         &#x26F6;
                       </button>
@@ -436,6 +680,9 @@ export function DashboardPage() {
                 <button className="mini-btn" onClick={() => navigate('/trades', { state: { trade: t } })}>Edit</button>
                 <button className="mini-btn delete-btn" onClick={() => handleDelete(t.id)}>Del</button>
               </div>
+                  </>
+                )
+              })()}
             </div>
           ))}
         </div>

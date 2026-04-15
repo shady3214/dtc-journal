@@ -14,12 +14,10 @@ const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTER
 
 const THEMES: { id: ThemeName; color: string; label: string }[] = [
   { id: 'obsidian', color: '#22c55e', label: 'Obsidian' },
-  { id: 'midnight', color: '#3b82f6', label: 'Midnight' },
-  { id: 'ember', color: '#f59e0b', label: 'Ember' },
-  { id: 'crimson', color: '#f43f5e', label: 'Crimson' },
-  { id: 'phantom', color: '#a855f7', label: 'Phantom' },
-  { id: 'white', color: '#0ea5e9', label: 'White' },
-  { id: 'amoled', color: '#00e5ff', label: 'AMOLED' },
+  { id: 'midnight', color: '#639bff', label: 'Midnight' },
+  { id: 'phantom',  color: '#c084fc', label: 'Phantom'  },
+  { id: 'white',    color: '#3b7ef5', label: 'White'    },
+  { id: 'amoled',   color: '#00e5ff', label: 'AMOLED'   },
 ]
 
 function slugifyAccountName(name: string) {
@@ -50,6 +48,11 @@ export function SettingsPage() {
   const [editName, setEditName] = useState('')
   const [editCapital, setEditCapital] = useState('')
   const [editDesc, setEditDesc] = useState('')
+  const [editIsPropFirm, setEditIsPropFirm] = useState(false)
+  const [editMaxDD, setEditMaxDD] = useState('')
+  const [editDailyLoss, setEditDailyLoss] = useState('')
+  const [editProfitTarget, setEditProfitTarget] = useState('')
+  const [editConsistency, setEditConsistency] = useState('')
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   // Current app version (read from Tauri at mount)
@@ -355,46 +358,90 @@ export function SettingsPage() {
 
               {editingId === acct.id ? (
                 /* Inline edit form */
-                <div className="account-edit-row">
-                  <input
-                    type="text"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    placeholder="Account name"
-                    style={{ flex: 2 }}
-                  />
-                  <input
-                    type="number"
-                    value={editCapital}
-                    onChange={(e) => setEditCapital(e.target.value)}
-                    placeholder="Capital"
-                    style={{ flex: 1 }}
-                  />
-                  <input
-                    type="text"
-                    value={editDesc}
-                    onChange={(e) => setEditDesc(e.target.value)}
-                    placeholder="Description (optional)"
-                    style={{ flex: 2 }}
-                  />
-                  <button
-                    className="mini-btn"
-                    onClick={() => {
-                      if (editName.trim()) {
-                        updateAccount(acct.id, {
-                          name: editName.trim(),
-                          capital: parseFloat(editCapital) || 0,
-                          description: editDesc.trim() || undefined,
-                        })
-                      }
-                      setEditingId(null)
-                    }}
-                  >
-                    Save
-                  </button>
-                  <button className="mini-btn" onClick={() => setEditingId(null)}>
-                    Cancel
-                  </button>
+                <div className="account-edit-expanded">
+                  <div className="account-edit-row">
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="Account name"
+                      style={{ flex: 2 }}
+                    />
+                    <input
+                      type="number"
+                      value={editCapital}
+                      onChange={(e) => setEditCapital(e.target.value)}
+                      placeholder="Capital"
+                      style={{ flex: 1 }}
+                    />
+                    <input
+                      type="text"
+                      value={editDesc}
+                      onChange={(e) => setEditDesc(e.target.value)}
+                      placeholder="Description (optional)"
+                      style={{ flex: 2 }}
+                    />
+                  </div>
+                  {/* Prop firm toggle */}
+                  <label className="propfirm-toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={editIsPropFirm}
+                      onChange={(e) => setEditIsPropFirm(e.target.checked)}
+                    />
+                    <span>Prop Firm Account</span>
+                    <span className="muted" style={{ fontSize: 12 }}>(enables live DD / target tracking on dashboard)</span>
+                  </label>
+                  {editIsPropFirm && (
+                    <div className="propfirm-fields">
+                      <div className="propfirm-field">
+                        <label>Max Drawdown ($)</label>
+                        <input type="number" min={0} step={100} placeholder="e.g. 10000"
+                          value={editMaxDD} onChange={(e) => setEditMaxDD(e.target.value)} />
+                      </div>
+                      <div className="propfirm-field">
+                        <label>Daily Loss Limit ($)</label>
+                        <input type="number" min={0} step={100} placeholder="e.g. 2000"
+                          value={editDailyLoss} onChange={(e) => setEditDailyLoss(e.target.value)} />
+                      </div>
+                      <div className="propfirm-field">
+                        <label>Profit Target ($)</label>
+                        <input type="number" min={0} step={100} placeholder="e.g. 10000"
+                          value={editProfitTarget} onChange={(e) => setEditProfitTarget(e.target.value)} />
+                      </div>
+                      <div className="propfirm-field">
+                        <label>Consistency Rule (%)</label>
+                        <input type="number" min={0} max={100} step={1} placeholder="e.g. 40"
+                          value={editConsistency} onChange={(e) => setEditConsistency(e.target.value)} />
+                        <span className="muted" style={{ fontSize: 11 }}>No single day &gt; this % of total profit</span>
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <button
+                      className="mini-btn"
+                      onClick={() => {
+                        if (editName.trim()) {
+                          updateAccount(acct.id, {
+                            name: editName.trim(),
+                            capital: parseFloat(editCapital) || 0,
+                            description: editDesc.trim() || undefined,
+                            isPropFirm: editIsPropFirm,
+                            propMaxDrawdown: editIsPropFirm ? (parseFloat(editMaxDD) || undefined) : undefined,
+                            propDailyLoss: editIsPropFirm ? (parseFloat(editDailyLoss) || undefined) : undefined,
+                            propProfitTarget: editIsPropFirm ? (parseFloat(editProfitTarget) || undefined) : undefined,
+                            propConsistencyRule: editIsPropFirm ? (parseFloat(editConsistency) || undefined) : undefined,
+                          })
+                        }
+                        setEditingId(null)
+                      }}
+                    >
+                      Save
+                    </button>
+                    <button className="mini-btn" onClick={() => setEditingId(null)}>
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               ) : (
                 /* Read-only view */
@@ -404,6 +451,9 @@ export function SettingsPage() {
                       {acct.name}
                       {acct.id === activeAccount.id && (
                         <span className="account-card-badge" style={{ marginLeft: 8 }}>Active</span>
+                      )}
+                      {acct.isPropFirm && (
+                        <span className="account-card-badge propfirm-badge" style={{ marginLeft: 6 }}>Prop Firm</span>
                       )}
                     </div>
                     <div className="account-card-meta">
@@ -421,6 +471,11 @@ export function SettingsPage() {
                         setEditName(acct.name)
                         setEditCapital(acct.capital.toString())
                         setEditDesc(acct.description || '')
+                        setEditIsPropFirm(acct.isPropFirm ?? false)
+                        setEditMaxDD(acct.propMaxDrawdown?.toString() ?? '')
+                        setEditDailyLoss(acct.propDailyLoss?.toString() ?? '')
+                        setEditProfitTarget(acct.propProfitTarget?.toString() ?? '')
+                        setEditConsistency(acct.propConsistencyRule?.toString() ?? '')
                       }}
                     >
                       Edit

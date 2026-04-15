@@ -116,6 +116,31 @@ export async function migrateLocalStorageToFiles(): Promise<void> {
   }
 }
 
+// ── Shared helpers ───────────────────────────────────────────
+
+/** Parse chart_image_data which may be a JSON array or a legacy single data URL. */
+export function parseChartImages(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  if (raw.startsWith('[')) {
+    try { return JSON.parse(raw) as string[] } catch { /* fall through */ }
+  }
+  return [raw]
+}
+
+/** Get the first valid image data URL from a trade (handles array and legacy formats). */
+function getPrimaryChartImage(chartImageData: string | undefined): { dataUrl: string; mimeType: string; b64: string } | null {
+  if (!chartImageData) return null
+  const images = parseChartImages(chartImageData)
+  const first = images[0]
+  if (!first) return null
+  const match = first.match(/^data:(image\/\w+);base64,(.+)/)
+  return {
+    dataUrl: first,
+    mimeType: match ? match[1] : 'image/png',
+    b64: match ? match[2] : first,
+  }
+}
+
 // ── localStorage fallback for browser dev ───────────────────
 
 const STORAGE_KEY = 'journal_trades'
@@ -607,12 +632,9 @@ const browserApi = {
     const trades = loadTrades()
     const trade = trades.find((t) => t.id === tradeId)
     if (!trade) throw new Error('Trade not found')
-    if (!trade.chartImageData) throw new Error('No chart image to analyze')
-
-    // Extract base64 data and mime type
-    const dataUrlMatch = trade.chartImageData.match(/^data:(image\/\w+);base64,(.+)/)
-    const mimeType = dataUrlMatch ? dataUrlMatch[1] : 'image/png'
-    const b64 = dataUrlMatch ? dataUrlMatch[2] : trade.chartImageData
+    const img = getPrimaryChartImage(trade.chartImageData)
+    if (!img) throw new Error('No chart image to analyze')
+    const { mimeType, b64 } = img
 
     const prompt = [
       `You are an expert forex trading coach analyzing a chart screenshot.`,
@@ -730,8 +752,22 @@ const browserApi = {
 // ── Tauri native API ────────────────────────────────────────
 
 const tauriApi = {
-  listTrades: () => invoke<Trade[]>('list_trades', { accountId: getActiveAccountId() }),
-  saveTrade: (trade: Trade) => invoke<Trade>('upsert_trade', { trade, accountId: getActiveAccountId() }),
+  listTrades: async (): Promise<Trade[]> => {
+    const trades = await invoke<Trade[]>('list_trades', { accountId: getActiveAccountId() })
+    return trades.map((t) => {
+      const screenshots = parseChartImages(t.chartImageData)
+      return { ...t, chartScreenshots: screenshots, chartImageData: screenshots[0] }
+    })
+  },
+  saveTrade: async (trade: Trade): Promise<Trade> => {
+    const screenshots = trade.chartScreenshots ?? (trade.chartImageData ? [trade.chartImageData] : [])
+    const packed: Trade = {
+      ...trade,
+      chartImageData: screenshots.length ? JSON.stringify(screenshots) : undefined,
+    }
+    const saved = await invoke<Trade>('upsert_trade', { trade: packed, accountId: getActiveAccountId() })
+    return { ...saved, chartScreenshots: screenshots, chartImageData: screenshots[0] }
+  },
   deleteTrade: (id: string) => invoke<void>('delete_trade', { id }),
   monthStats: (year: number, month: number) =>
     invoke<CalendarDayStat[]>('get_calendar_month', { year, month, accountId: getActiveAccountId() }),
@@ -824,11 +860,9 @@ function getSupabaseApi() {
       const trades = await dbListTrades(userId, accountId)
       const trade = trades.find((t) => t.id === tradeId)
       if (!trade) throw new Error('Trade not found')
-      if (!trade.chartImageData) throw new Error('No chart image to analyze')
-
-      const dataUrlMatch = trade.chartImageData.match(/^data:(image\/\w+);base64,(.+)/)
-      const mimeType = dataUrlMatch ? dataUrlMatch[1] : 'image/png'
-      const b64 = dataUrlMatch ? dataUrlMatch[2] : trade.chartImageData
+      const img = getPrimaryChartImage(trade.chartImageData)
+      if (!img) throw new Error('No chart image to analyze')
+      const { mimeType, b64 } = img
 
       const prompt = buildAiPrompt(trade)
       const settings = await dbGetSettings(userId)

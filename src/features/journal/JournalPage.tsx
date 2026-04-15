@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { getApi, analyzeJournalEntry } from '../../shared/lib/api'
 import type { JournalEntry, JournalAiFeedback } from '../../shared/types/domain'
 import { useAccount } from '../../shared/contexts/AccountContext'
+
+const MAX_JOURNAL_SCREENSHOTS = 5
 
 const BIASES = ['Bullish', 'Bearish', 'Neutral']
 const SESSIONS = ['Asian', 'London', 'New York']
@@ -21,6 +23,7 @@ function formatDateLabel(date: string): string {
 function hasContent(entry: JournalEntry): boolean {
   return !!(
     entry.preBias || entry.preSession || entry.preLevels || entry.prePlan ||
+    (entry.preScreenshots && entry.preScreenshots.length > 0) ||
     entry.postWentWell || entry.postWentWrong || entry.postLessons ||
     entry.postMood || entry.postGrade
   )
@@ -32,6 +35,7 @@ const emptyEntry = (date: string): JournalEntry => ({
   preSession: '',
   preLevels: '',
   prePlan: '',
+  preScreenshots: [],
   postWentWell: '',
   postWentWrong: '',
   postLessons: '',
@@ -202,6 +206,18 @@ function JournalSummary({ entry, expanded, onToggle, onEdit, onAiFeedback, aiBus
                   <p className="journal-ro-text">{entry.prePlan}</p>
                 </div>
               )}
+              {entry.preScreenshots && entry.preScreenshots.length > 0 && (
+                <div className="journal-ro-block">
+                  <span className="journal-ro-label">Bias Screenshots</span>
+                  <div className="screenshot-thumbnails" style={{ marginTop: 8 }}>
+                    {entry.preScreenshots.map((src, i) => (
+                      <div key={i} className="screenshot-thumb">
+                        <img src={src} alt={`Bias screenshot ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -290,6 +306,57 @@ function JournalForm({ entry, onUpdate, onSave, onCancel, showCancel }: {
   showCancel: boolean
 }) {
   const [saved, setSaved] = useState(false)
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const lastPastedAtRef = useRef<number>(0)
+  const lastAddedRef = useRef<string>('')
+
+  const screenshots = entry.preScreenshots ?? []
+
+  const addScreenshotFile = useCallback((file: File) => {
+    if (screenshots.length >= MAX_JOURNAL_SCREENSHOTS) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string
+      if (!dataUrl) return
+      const now = Date.now()
+      if (dataUrl === lastAddedRef.current && now - lastPastedAtRef.current < 1200) return
+      if (screenshots.includes(dataUrl)) return
+      lastAddedRef.current = dataUrl
+      lastPastedAtRef.current = now
+      onUpdate({ preScreenshots: [...screenshots, dataUrl] })
+    }
+    reader.readAsDataURL(file)
+  }, [screenshots, onUpdate])
+
+  const removeScreenshot = useCallback((idx: number) => {
+    const next = screenshots.filter((_, i) => i !== idx)
+    onUpdate({ preScreenshots: next })
+    if (lightboxIdx !== null && lightboxIdx >= next.length) setLightboxIdx(null)
+  }, [screenshots, onUpdate, lightboxIdx])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    Array.from(e.dataTransfer.files)
+      .filter((f) => f.type.startsWith('image/'))
+      .forEach(addScreenshotFile)
+  }, [addScreenshotFile])
+
+  // Global paste listener for Ctrl+V anywhere on the form
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = Array.from(e.clipboardData?.items ?? [])
+      const imageItem = items.find((it) => it.type.startsWith('image/'))
+      if (!imageItem) return
+      const now = Date.now()
+      if (now - lastPastedAtRef.current < 300) return
+      lastPastedAtRef.current = now
+      const file = imageItem.getAsFile()
+      if (file) addScreenshotFile(file)
+    }
+    document.addEventListener('paste', handlePaste)
+    return () => document.removeEventListener('paste', handlePaste)
+  }, [addScreenshotFile])
 
   const handleSave = async () => {
     onSave()
@@ -354,6 +421,67 @@ function JournalForm({ entry, onUpdate, onSave, onCancel, showCancel }: {
             placeholder="What setups am I looking for? What are my rules for today?"
           />
         </div>
+
+        {/* Bias screenshots */}
+        <div className="field" style={{ marginTop: 12 }}>
+          <span>Bias Screenshots ({screenshots.length}/{MAX_JOURNAL_SCREENSHOTS})</span>
+          {screenshots.length < MAX_JOURNAL_SCREENSHOTS && (
+            <div
+              className="screenshot-dropzone"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              style={{ marginTop: 8 }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+              <span>Drop, paste <kbd>Ctrl+V</kbd>, or click to upload</span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  Array.from(e.target.files ?? []).forEach(addScreenshotFile)
+                  e.target.value = ''
+                }}
+              />
+            </div>
+          )}
+          {screenshots.length > 0 && (
+            <div className="screenshot-thumbnails" style={{ marginTop: 8 }}>
+              {screenshots.map((src, i) => (
+                <div key={i} className="screenshot-thumb" onClick={() => setLightboxIdx(i)}>
+                  <img src={src} alt={`Bias screenshot ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }} />
+                  <button
+                    className="screenshot-remove"
+                    onClick={(e) => { e.stopPropagation(); removeScreenshot(i) }}
+                    title="Remove"
+                  >×</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Screenshot lightbox */}
+        {lightboxIdx !== null && screenshots[lightboxIdx] && (
+          <div className="screenshot-lightbox" onClick={() => setLightboxIdx(null)}>
+            <div className="screenshot-lightbox-inner" onClick={(e) => e.stopPropagation()}>
+              <img src={screenshots[lightboxIdx]} alt={`Bias screenshot ${lightboxIdx + 1}`} />
+              <div className="screenshot-lightbox-actions">
+                <button disabled={lightboxIdx === 0} onClick={() => setLightboxIdx((i) => Math.max(0, (i ?? 0) - 1))}>Prev</button>
+                <span className="muted">{lightboxIdx + 1} / {screenshots.length}</span>
+                <button disabled={lightboxIdx === screenshots.length - 1} onClick={() => setLightboxIdx((i) => Math.min(screenshots.length - 1, (i ?? 0) + 1))}>Next</button>
+                <button onClick={() => setLightboxIdx(null)}>✕ Close</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Post-Session Review */}

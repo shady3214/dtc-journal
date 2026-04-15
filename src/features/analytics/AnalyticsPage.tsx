@@ -180,7 +180,15 @@ function StreakTracker({ trades }: { trades: Trade[] }) {
               {(() => {
                 const grossWin = sorted.filter(t => t.pnl > 0).reduce((s, t) => s + t.pnl, 0)
                 const grossLoss = Math.abs(sorted.filter(t => t.pnl < 0).reduce((s, t) => s + t.pnl, 0))
-                return grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : 'N/A'
+                const pf = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : null
+                return pf !== null ? pf : (
+                  <span
+                    className="pf-na"
+                    title="Profit Factor requires at least one winning trade and one losing trade to calculate (Gross Win ÷ Gross Loss)."
+                  >
+                    N/A
+                  </span>
+                )
               })()}
             </span>
           </div>

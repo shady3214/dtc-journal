@@ -6,6 +6,7 @@ import { AnalyticsPage } from '../features/analytics/AnalyticsPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
 import { JournalPage } from '../features/journal/JournalPage'
 import { NewsCalendarPage } from '../features/news-calendar/NewsCalendarPage'
+import { ToolsPage } from '../features/tools/ToolsPage'
 import { LoginPage } from '../features/auth/LoginPage'
 import { useAuth } from '../shared/contexts/AuthContext'
 
@@ -75,6 +76,7 @@ export const router = createBrowserRouter([
           { path: 'analytics', element: <AnalyticsPage /> },
           { path: 'journal', element: <JournalPage /> },
           { path: 'news-calendar', element: <NewsCalendarPage /> },
+          { path: 'tools', element: <ToolsPage /> },
           { path: 'settings', element: <SettingsPage /> },
         ],
       },

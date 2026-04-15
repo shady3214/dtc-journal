@@ -9,12 +9,10 @@ import { notificationScheduler, requestNotificationPermission } from '../shared/
 
 const THEMES: { id: ThemeName; color: string; label: string }[] = [
   { id: 'obsidian', color: '#22c55e', label: 'Obsidian' },
-  { id: 'midnight', color: '#3b82f6', label: 'Midnight' },
-  { id: 'ember', color: '#f59e0b', label: 'Ember' },
-  { id: 'crimson', color: '#f43f5e', label: 'Crimson' },
-  { id: 'phantom', color: '#a855f7', label: 'Phantom' },
-  { id: 'white', color: '#0ea5e9', label: 'White' },
-  { id: 'amoled', color: '#00e5ff', label: 'AMOLED' },
+  { id: 'midnight', color: '#639bff', label: 'Midnight' },
+  { id: 'phantom', color: '#c084fc', label: 'Phantom' },
+  { id: 'white',   color: '#3b7ef5', label: 'White'    },
+  { id: 'amoled',  color: '#00e5ff', label: 'AMOLED'   },
 ]
 
 const navItems = [
@@ -23,6 +21,7 @@ const navItems = [
   { to: '/analytics', label: 'Analytics', icon: 'analytics' },
   { to: '/journal', label: 'Journal', icon: 'journal' },
   { to: '/news-calendar', label: 'News Calendar', icon: 'news-calendar' },
+  { to: '/tools', label: 'Tools', icon: 'tools' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
 ]
 
@@ -81,6 +80,12 @@ function NavIcon({ name }: { name: string }) {
           <circle cx="16" cy="15" r="1" fill="currentColor" />
         </svg>
       )
+    case 'tools':
+      return (
+        <svg {...p}>
+          <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
+        </svg>
+      )
     case 'settings':
       return (
         <svg {...p}>
@@ -106,9 +111,11 @@ export function AppShell() {
   const { accounts, activeAccount, switchAccount } = useAccount()
   const [acctDropdownOpen, setAcctDropdownOpen] = useState(false)
   const [displayName, setDisplayName] = useState<string>(() => loadSettings().displayName || '')
+  const VALID_THEMES = new Set(THEMES.map((t) => t.id))
   const [theme, setTheme] = useState<ThemeName>(() => {
     const s = loadSettings()
-    return s.theme || 'obsidian'
+    const saved = s.theme
+    return saved && VALID_THEMES.has(saved) ? saved : 'obsidian'
   })
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     return localStorage.getItem('sidebar-open') !== 'false'
@@ -124,7 +131,8 @@ export function AppShell() {
   useEffect(() => {
     const s = loadSettings()
     setDisplayName(s.displayName || '')
-    setTheme(s.theme || 'obsidian')
+    const saved = s.theme
+    setTheme(saved && VALID_THEMES.has(saved) ? saved : 'obsidian')
   }, [location.pathname, activeAccount.id, accounts.length])
 
   // Persist sidebar state
@@ -366,15 +374,12 @@ export function AppShell() {
                 style={{ background: THEMES.find((t) => t.id === theme)?.color }}
               />
             </button>
-            <div className="quick-filters">
-              <button>Today</button>
-              <button>This Week</button>
-              <button>This Month</button>
-            </div>
           </div>
         </header>
         <section className="page-body">
-          <Outlet />
+          <div key={location.key} className="page-transition">
+            <Outlet />
+          </div>
         </section>
       </main>
     </div>

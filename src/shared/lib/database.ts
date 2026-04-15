@@ -2,6 +2,17 @@ import { supabase } from './supabase'
 import type { Trade, JournalEntry, AppSettings } from '../types/domain'
 import { DEFAULT_SETTINGS } from './api'
 
+// ── Shared helpers ───────────────────────────────────────────
+
+/** Parse chart_image_data which may be a JSON array or a legacy single data URL. */
+function parseChartImages(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  if (raw.startsWith('[')) {
+    try { return JSON.parse(raw) as string[] } catch { /* fall through */ }
+  }
+  return [raw]
+}
+
 // ── Helper: Trade object ↔ DB row mapping ───────────────────
 
 function tradeToRow(trade: Trade, userId: string, accountId: string) {
@@ -25,7 +36,9 @@ function tradeToRow(trade: Trade, userId: string, accountId: string) {
     tags: trade.tags,
     mistakes: trade.mistakes,
     setup: trade.setup || null,
-    chart_image_data: trade.chartImageData || null,
+    chart_image_data: trade.chartScreenshots?.length
+      ? JSON.stringify(trade.chartScreenshots)
+      : (trade.chartImageData || null),
     notes_html: trade.notesHtml,
     opened_at: trade.openedAt,
     closed_at: trade.closedAt || null,
@@ -52,7 +65,8 @@ function rowToTrade(row: any): Trade {
     tags: row.tags || [],
     mistakes: row.mistakes || [],
     setup: row.setup || undefined,
-    chartImageData: row.chart_image_data || undefined,
+    chartImageData: parseChartImages(row.chart_image_data)[0] || undefined,
+    chartScreenshots: parseChartImages(row.chart_image_data),
     notesHtml: row.notes_html,
     openedAt: row.opened_at,
     closedAt: row.closed_at || undefined,

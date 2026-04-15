@@ -20,10 +20,11 @@ interface GaugeProps {
   centerLabel: string
   centerValue: string
   winRate: number
+  empty?: boolean
   stats: { label: string; value: string }[]
 }
 
-function GaugeCard({ title, centerLabel, centerValue, winRate, stats }: GaugeProps) {
+function GaugeCard({ title, centerLabel, centerValue, winRate, empty, stats }: GaugeProps) {
   const cx = 100, cy = 100, r = 70, sw = 12
   const lossRate = Math.max(0, 1 - winRate)
 
@@ -31,22 +32,26 @@ function GaugeCard({ title, centerLabel, centerValue, winRate, stats }: GaugePro
     <div className="card gauge-card">
       <h3>{title}</h3>
       <svg viewBox="0 0 200 112" className="gauge-svg">
-        {/* Track */}
+        {/* Track — always visible */}
         <path d={gaugeArcPath(cx, cy, r, 0, 1)} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={sw} strokeLinecap="round" />
-        {/* Green (wins) — left to winRate */}
-        {winRate > 0 && (
-          <path d={gaugeArcPath(cx, cy, r, 0, winRate)} fill="none" stroke="#22c55e" strokeWidth={sw} strokeLinecap="butt" />
-        )}
-        {/* Red (losses) — winRate to right */}
-        {lossRate > 0 && (
-          <path d={gaugeArcPath(cx, cy, r, winRate, 1)} fill="none" stroke="#f87171" strokeWidth={sw} strokeLinecap="butt" />
-        )}
-        {/* Round caps on the two outer endpoints only */}
-        {winRate > 0 && (
-          <circle cx={cx + r * Math.cos(Math.PI)} cy={cy - r * Math.sin(Math.PI)} r={sw / 2} fill="#22c55e" />
-        )}
-        {lossRate > 0 && (
-          <circle cx={cx + r * Math.cos(0)} cy={cy - r * Math.sin(0)} r={sw / 2} fill="#f87171" />
+        {!empty && (
+          <>
+            {/* Green (wins) — left to winRate */}
+            {winRate > 0 && (
+              <path d={gaugeArcPath(cx, cy, r, 0, winRate)} fill="none" stroke="#22c55e" strokeWidth={sw} strokeLinecap="butt" />
+            )}
+            {/* Red (losses) — winRate to right */}
+            {lossRate > 0 && (
+              <path d={gaugeArcPath(cx, cy, r, winRate, 1)} fill="none" stroke="#f87171" strokeWidth={sw} strokeLinecap="butt" />
+            )}
+            {/* Round caps on the two outer endpoints only */}
+            {winRate > 0 && (
+              <circle cx={cx + r * Math.cos(Math.PI)} cy={cy - r * Math.sin(Math.PI)} r={sw / 2} fill="#22c55e" />
+            )}
+            {lossRate > 0 && (
+              <circle cx={cx + r * Math.cos(0)} cy={cy - r * Math.sin(0)} r={sw / 2} fill="#f87171" />
+            )}
+          </>
         )}
         {/* Center text inside the dome */}
         <text x={cx} y={cy - 24} textAnchor="middle" className="gauge-center-label">{centerLabel}</text>
@@ -90,13 +95,14 @@ export function ProfitabilityGauges({ trades }: { trades: Trade[] }) {
     <div className="gauge-row">
       <GaugeCard
         title="Short Analysis"
-        centerLabel={sht.totalPnl >= 0 ? 'Profit' : 'Loss'}
-        centerValue={fmt(sht.totalPnl)}
+        centerLabel={shorts.length === 0 ? 'No Shorts' : sht.totalPnl >= 0 ? 'Profit' : 'Loss'}
+        centerValue={shorts.length === 0 ? '—' : fmt(sht.totalPnl)}
         winRate={sht.winRate}
+        empty={shorts.length === 0}
         stats={[
-          { label: `Wins (${sht.wins})`, value: fmt(sht.winPnl) },
-          { label: 'Win Rate', value: `${(sht.winRate * 100).toFixed(0)}%` },
-          { label: `Losses (${sht.losses})`, value: fmt(sht.lossPnl) },
+          { label: `Wins (${sht.wins})`, value: shorts.length === 0 ? '—' : fmt(sht.winPnl) },
+          { label: 'Win Rate', value: shorts.length === 0 ? '—' : `${(sht.winRate * 100).toFixed(0)}%` },
+          { label: `Losses (${sht.losses})`, value: shorts.length === 0 ? '—' : fmt(sht.lossPnl) },
         ]}
       />
       <GaugeCard
@@ -111,13 +117,14 @@ export function ProfitabilityGauges({ trades }: { trades: Trade[] }) {
       />
       <GaugeCard
         title="Long Analysis"
-        centerLabel={lng.totalPnl >= 0 ? 'Profit' : 'Loss'}
-        centerValue={fmt(lng.totalPnl)}
+        centerLabel={longs.length === 0 ? 'No Longs' : lng.totalPnl >= 0 ? 'Profit' : 'Loss'}
+        centerValue={longs.length === 0 ? '—' : fmt(lng.totalPnl)}
         winRate={lng.winRate}
+        empty={longs.length === 0}
         stats={[
-          { label: `Wins (${lng.wins})`, value: fmt(lng.winPnl) },
-          { label: 'Win Rate', value: `${(lng.winRate * 100).toFixed(0)}%` },
-          { label: `Losses (${lng.losses})`, value: fmt(lng.lossPnl) },
+          { label: `Wins (${lng.wins})`, value: longs.length === 0 ? '—' : fmt(lng.winPnl) },
+          { label: 'Win Rate', value: longs.length === 0 ? '—' : `${(lng.winRate * 100).toFixed(0)}%` },
+          { label: `Losses (${lng.losses})`, value: longs.length === 0 ? '—' : fmt(lng.lossPnl) },
         ]}
       />
     </div>

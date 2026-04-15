@@ -34,52 +34,58 @@ const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTER
 // ── Data fetching ──────────────────────────────────────────────────
 
 async function fetchAllEvents(): Promise<FfEvent[]> {
-  if (isTauri) {
-    const { invoke } = await import('@tauri-apps/api/core')
-    const [thisWeek] = await Promise.allSettled([
-      invoke<string>('proxy_ff_calendar'),
-    ])
-    const results: FfEvent[] = []
-    if (thisWeek.status === 'fulfilled') {
-      try { results.push(...(JSON.parse(thisWeek.value) as FfEvent[])) } catch { /* ignore */ }
-    }
-    // nextWeek not available via Tauri proxy — only thisweek endpoint exists
-    return results
-  }
-
-  // Browser: fetch both endpoints directly, fall back to Vercel proxy
-  const fetchUrl = async (url: string): Promise<FfEvent[]> => {
+  const safeJsonFetch = async (url: string): Promise<FfEvent[]> => {
     try {
-      let resp = await fetch(url, { signal: AbortSignal.timeout(8000) })
-      if (!resp.ok) throw new Error('direct failed')
-      return await resp.json()
+      const resp = await fetch(url, { signal: AbortSignal.timeout(9000) })
+      if (!resp.ok) return []
+      const data = await resp.json()
+      return Array.isArray(data) ? data as FfEvent[] : []
     } catch {
-      // Fallback: only the thisweek proxy exists on Vercel
-      if (url === FF_THIS_WEEK) {
-        try {
-          const resp = await fetch('/api/ff-calendar', { signal: AbortSignal.timeout(8000) })
-          if (resp.ok) return await resp.json()
-        } catch { /* ignore */ }
-      }
       return []
     }
   }
 
-  const [thisWeek, nextWeek] = await Promise.all([
-    fetchUrl(FF_THIS_WEEK),
-    fetchUrl(FF_NEXT_WEEK),
-  ])
+  const results: FfEvent[] = []
 
-  // Deduplicate by date+title
+  // 1) Tauri proxy first (desktop reliability when CORS/WAF blocks direct calls)
+  if (isTauri) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const payload = await invoke<string>('proxy_ff_calendar')
+      const parsed = JSON.parse(payload)
+      if (Array.isArray(parsed)) results.push(...(parsed as FfEvent[]))
+    } catch {
+      // Ignore and continue with HTTP fallbacks.
+    }
+  }
+
+  // 2) Direct ForexFactory endpoints (this week + next week)
+  const [directThisWeek, directNextWeek] = await Promise.all([
+    safeJsonFetch(FF_THIS_WEEK),
+    safeJsonFetch(FF_NEXT_WEEK),
+  ])
+  results.push(...directThisWeek, ...directNextWeek)
+
+  // 3) Last fallback: local Vercel proxy for this-week data
+  // (useful when FF blocks direct requests in browser)
+  if (results.length === 0) {
+    const proxied = await safeJsonFetch('/api/ff-calendar')
+    results.push(...proxied)
+  }
+
+  // Deduplicate by date+title+country
   const seen = new Set<string>()
   const all: FfEvent[] = []
-  for (const ev of [...thisWeek, ...nextWeek]) {
+  for (const ev of results) {
     const key = `${ev.date}|${ev.title}|${ev.country}`
     if (!seen.has(key)) {
       seen.add(key)
       all.push(ev)
     }
   }
+
+  // Sort so rendering and month bounds are deterministic.
+  all.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
   return all
 }
 
@@ -191,8 +197,10 @@ export function NewsCalendarPage() {
   const eventsQuery = useQuery({
     queryKey: ['ff-events'],
     queryFn: fetchAllEvents,
-    staleTime: 5 * 60 * 1000,
-    retry: 1,
+    staleTime: 2 * 60 * 1000,
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 6000),
+    refetchOnWindowFocus: true,
   })
 
   // Trades for PNL tab
@@ -201,8 +209,40 @@ export function NewsCalendarPage() {
     queryFn: () => getApi().listTrades(),
   })
 
-  const prevMonth = () => setMonth(new Date(year, mon - 1, 1))
-  const nextMonth = () => setMonth(new Date(year, mon + 1, 1))
+  // Derive navigation bounds from actual loaded event data so the arrows are
+  // only enabled for months that genuinely have events. Fall back to the
+  // current month while data is still loading.
+  const now = new Date()
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+
+  const { minMonth, maxMonth } = useMemo(() => {
+    const events = eventsQuery.data ?? []
+    if (events.length === 0) {
+      return { minMonth: currentMonthStart, maxMonth: currentMonthStart }
+    }
+    let earliest = new Date(8640000000000000)
+    let latest   = new Date(-8640000000000000)
+    for (const ev of events) {
+      const d = new Date(ev.date)
+      if (d < earliest) earliest = d
+      if (d > latest)   latest   = d
+    }
+    const mn = new Date(earliest.getFullYear(), earliest.getMonth(), 1)
+    const mx = new Date(latest.getFullYear(), latest.getMonth(), 1)
+    // Always include current month (needed for PNL tab even with no events)
+    return {
+      minMonth: mn < currentMonthStart ? mn : currentMonthStart,
+      maxMonth: mx > currentMonthStart ? mx : currentMonthStart,
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventsQuery.data])
+
+  const atMin = month <= minMonth
+  const atMax = month >= maxMonth
+  const outsideRange = month < minMonth || month > maxMonth
+
+  const prevMonth = () => { if (!atMin) setMonth(new Date(year, mon - 1, 1)) }
+  const nextMonth = () => { if (!atMax) setMonth(new Date(year, mon + 1, 1)) }
 
   // Build calendar grid cells
   const daysInMonth = new Date(year, mon + 1, 0).getDate()
@@ -224,6 +264,7 @@ export function NewsCalendarPage() {
     }
     return map
   }, [eventsQuery.data])
+  const noEventsLoaded = !eventsQuery.isLoading && !eventsQuery.isError && (eventsQuery.data?.length ?? 0) === 0
 
   // PNL grouped by date string
   const pnlByDay = useMemo(() => {
@@ -272,14 +313,17 @@ export function NewsCalendarPage() {
           </div>
         </div>
         <div className="ec-header-right">
-          <button className="ec-nav-btn" onClick={prevMonth} title="Previous month">←</button>
           <span className="ec-month-label">{monthLabel}</span>
-          <button className="ec-nav-btn" onClick={nextMonth} title="Next month">→</button>
         </div>
       </div>
 
       {/* ── Calendar grid ── */}
       <div className="card ec-calendar-card">
+        {outsideRange && (
+          <div className="ec-range-notice">
+            Event data is only available for the current and next week. Navigate back to see events.
+          </div>
+        )}
         {eventsQuery.isLoading && tab === 'events' && (
           <p className="muted" style={{ padding: '8px 0 12px' }}>Loading economic events…</p>
         )}
@@ -287,6 +331,29 @@ export function NewsCalendarPage() {
           <p className="muted" style={{ padding: '8px 0 12px', color: 'var(--negative)' }}>
             Could not load ForexFactory calendar. Check your connection.
           </p>
+        )}
+        {noEventsLoaded && tab === 'events' && (
+          <div
+            className="card"
+            style={{
+              marginBottom: 10,
+              padding: '10px 12px',
+              borderColor: 'var(--danger-border)',
+              background: 'var(--danger-bg)',
+              color: 'var(--text)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 10,
+            }}
+          >
+            <span style={{ fontSize: 12 }}>
+              News feed returned no events. This is usually temporary — retry now.
+            </span>
+            <button className="mini-btn" onClick={() => { void eventsQuery.refetch() }}>
+              Retry
+            </button>
+          </div>
         )}
 
         {/* Day headers */}
